@@ -29,6 +29,13 @@ Example:
     nicholas.json
 ```
 
+Project layout:
+
+```text
+codex-manager.sh   # entrypoint and module loader
+lib/               # implementation modules
+```
+
 ## Requirements
 
 - `bash`
@@ -103,8 +110,9 @@ back to the tmux strategy. For that fallback, it:
 ./codex-manager.sh get
 ```
 
-The direct path does not modify profiles and does not use `jq`. The tmux
-fallback may create live Codex session activity for accounts that need fallback.
+The direct path does not use `jq`. It may update profile JSON files when token
+refresh is needed. The tmux fallback may create live Codex session activity for
+accounts that need fallback.
 
 ### `rotate`
 
@@ -154,6 +162,9 @@ It creates this symlink:
 ```bash
 ~/.local/bin/codex-manager -> ./codex-manager.sh
 ```
+
+The installed command resolves the real script path, so the `lib/` directory
+beside `codex-manager.sh` is loaded correctly through the symlink.
 
 It also adds this line to `~/.bashrc` if it is not already present:
 
