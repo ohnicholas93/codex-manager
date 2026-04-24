@@ -50,6 +50,8 @@ Example:
 ### `list`
 
 Lists all available profiles from `$CODEX_HOME/profiles/*.json`.
+The currently active profile is marked with `#` when `$CODEX_HOME/auth.json`
+exactly matches a profile file.
 
 ```bash
 ./codex-manager.sh list
@@ -83,6 +85,8 @@ For each profile, Codex Manager:
 5. Polls `/status` until Codex reports refreshed limit data.
 6. Prints a per-profile table with 5h and weekly availability.
 7. Marks the recommended rotate target with `*`.
+8. Marks the currently active profile with `#` when `$CODEX_HOME/auth.json`
+   exactly matches a profile file.
 
 ```bash
 ./codex-manager.sh get

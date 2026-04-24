@@ -101,6 +101,28 @@ profile_names() {
     | sort
 }
 
+active_profile_names() {
+  local home dir auth profile file
+  home="$(codex_home)"
+  dir="$(profiles_dir)"
+  auth="$home/auth.json"
+
+  [[ -f "$auth" && -d "$dir" ]] || return 0
+
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    file="$dir/$profile.json"
+    if cmp -s "$auth" "$file"; then
+      printf '%s\n' "$profile"
+    fi
+  done < <(profile_names)
+}
+
+is_active_profile() {
+  local profile="$1"
+  grep -Fxq "$profile" <<<"${ACTIVE_PROFILES:-}"
+}
+
 safe_session_name() {
   local raw="$1"
   printf '%s' "$raw" | tr -c 'A-Za-z0-9_-' '_'
@@ -266,12 +288,28 @@ render_table() {
   local rows_file="$1"
   local title="${2:-Codex Manager Limits}"
   local recommended="${3:-}"
+  local active_profiles="${4:-}"
+  local active_profile has_plus=0 has_star=0 has_hash=0
+
+  if [[ -n "$recommended" ]]; then
+    if grep -Fxq "$recommended" <<<"$active_profiles"; then
+      has_plus=1
+    else
+      has_star=1
+    fi
+  fi
+  while IFS= read -r active_profile; do
+    [[ -n "$active_profile" ]] || continue
+    if [[ "$active_profile" != "$recommended" ]]; then
+      has_hash=1
+    fi
+  done <<<"$active_profiles"
 
   printf '\n%s\n' "$title"
   printf '%s\n' '--------------------------------------------------------------------------------'
   printf '%-26s %-6s %-8s %-11s %-18s\n' 'Profile' '5h' 'Weekly' '5h reset' 'Weekly reset'
   printf '%s\n' '--------------------------------------------------------------------------------'
-  awk -F '\t' -v recommended="$recommended" '
+  awk -F '\t' -v recommended="$recommended" -v active_profiles="$active_profiles" '
     function clip(value, width) {
       if (length(value) <= width) return value
       if (width <= 1) return substr(value, 1, width)
@@ -281,25 +319,58 @@ render_table() {
       if (tier == "" || tier == "unknown") return profile
       return profile " (" tier ")"
     }
+    function is_active(profile,    count, active, i) {
+      count = split(active_profiles, active, "\n")
+      for (i = 1; i <= count; i++) {
+        if (active[i] == profile) return 1
+      }
+      return 0
+    }
+    function marker(profile) {
+      if (profile == recommended && is_active(profile)) return "+"
+      if (profile == recommended) return "*"
+      if (is_active(profile)) return "#"
+      return " "
+    }
     $2 == "ERROR" {
-      marker = ($1 == recommended) ? "*" : " "
-      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker, clip($1, 24), "ERR", "ERR", "-", "-"
+      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker($1), clip($1, 24), "ERR", "ERR", "-", "-"
       next
     }
     {
-      marker = ($1 == recommended) ? "*" : " "
-      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker, clip(label($1, $7), 24), $2 "%", $3 "%", clip($4, 11), clip($5, 18)
+      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker($1), clip(label($1, $7), 24), $2 "%", $3 "%", clip($4, 11), clip($5, 18)
     }
   ' "$rows_file"
   printf '%s\n' '--------------------------------------------------------------------------------'
-  if [[ -n "$recommended" ]]; then
+  if (( has_plus )); then
+    printf '+ recommended rotate target and currently active profile\n'
+  fi
+  if (( has_hash )); then
+    printf '# currently active profile\n'
+  fi
+  if (( has_star )); then
     printf '* recommended rotate target\n'
   fi
   printf '\n'
 }
 
 cmd_list() {
-  profile_names
+  local active_profiles profile marker
+  active_profiles="$(active_profile_names)"
+
+  printf '%s\n' '--------------------------------------------------------------------------------'
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    marker=" "
+    if grep -Fxq "$profile" <<<"$active_profiles"; then
+      marker="#"
+    fi
+    printf '%s %s\n' "$marker" "$profile"
+  done < <(profile_names)
+  printf '%s\n' '--------------------------------------------------------------------------------'
+
+  if [[ -n "$active_profiles" ]]; then
+    printf '# currently active profile\n'
+  fi
 }
 
 best_profile_from_rows() {
@@ -400,8 +471,9 @@ cmd_get() {
   done
   rm -rf "$tmp_dir"
 
+  ACTIVE_PROFILES="$(active_profile_names)"
   LAST_RECOMMENDED_PROFILE="$(best_profile_from_rows "$rows_file")"
-  render_table "$rows_file" "Codex Manager Limits" "$LAST_RECOMMENDED_PROFILE"
+  render_table "$rows_file" "Codex Manager Limits" "$LAST_RECOMMENDED_PROFILE" "$ACTIVE_PROFILES"
   LAST_ROWS_FILE="$rows_file"
   return "$failed"
 }
