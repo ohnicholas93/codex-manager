@@ -15,7 +15,7 @@ Usage:
   codex-manager.sh get
   codex-manager.sh use <name>
   codex-manager.sh rotate
-  codex-manager.sh profiles
+  codex-manager.sh list
 
 Environment:
   CODEX_HOME                         Defaults to ~/.codex
@@ -148,7 +148,7 @@ wait_until_ready() {
 parse_status() {
   local pane="$1"
   local profile="$2"
-  local account five_line weekly_line
+  local account tier five_line weekly_line
   local five_percent weekly_percent five_reset weekly_reset
 
   five_line="$(grep -E '5h limit:' <<<"$pane" | tail -n 1 || true)"
@@ -164,6 +164,8 @@ parse_status() {
     }
   ' <<<"$pane" | tail -n 1)"
   account="$(trim "${account:-unknown}")"
+  tier="$(sed -nE 's/.*\(([^()]*)\)[[:space:]]*$/\1/p' <<<"$account" | tail -n 1)"
+  tier="$(trim "${tier:-unknown}")"
 
   five_percent="$(sed -nE 's/.*[^0-9]([0-9]+)% left.*/\1/p' <<<"$five_line" | tail -n 1)"
   weekly_percent="$(sed -nE 's/.*[^0-9]([0-9]+)% left.*/\1/p' <<<"$weekly_line" | tail -n 1)"
@@ -173,7 +175,7 @@ parse_status() {
   [[ "$five_percent" =~ ^[0-9]+$ && "$weekly_percent" =~ ^[0-9]+$ ]] || return 1
 
   RESULT_PROFILE="$profile"
-  RESULT_ACCOUNT="$account"
+  RESULT_TIER="$tier"
   RESULT_5H="$five_percent"
   RESULT_WEEKLY="$weekly_percent"
   RESULT_5H_RESET="$(trim "${five_reset:-unknown}")"
@@ -184,10 +186,11 @@ parse_status() {
 
 get_one_profile() {
   local profile="$1"
-  local source tmp_home session command elapsed pane
+  local session="${2:-}"
+  local source tmp_home command elapsed pane
   source="$(profile_path "$profile")"
   tmp_home="$(safe_temp_home "$profile")"
-  session="$(safe_session_name "${APP_NAME}_${profile}_$(profile_hash "$profile")_$$")"
+  session="${session:-$(safe_session_name "${APP_NAME}_${profile}_$(profile_hash "$profile")_$$")}"
 
   [[ -f "$source" ]] || die "profile does not exist: $source"
   reset_temp_home "$tmp_home"
@@ -220,7 +223,7 @@ get_one_profile() {
         "$RESULT_5H_RESET" \
         "$RESULT_WEEKLY_RESET" \
         "$RESULT_SCORE" \
-        "$RESULT_ACCOUNT"
+        "$RESULT_TIER"
       return 0
     fi
   done
@@ -239,25 +242,63 @@ cleanup_sessions() {
 render_table() {
   local rows_file="$1"
   local title="${2:-Codex Manager Limits}"
+  local recommended="${3:-}"
 
   printf '\n%s\n' "$title"
-  printf '%s\n' '-------------------------------------------------------------------------------'
-  printf '%-18s %-6s %-8s %-18s %-22s %s\n' 'Profile' '5h' 'Weekly' '5h reset' 'Weekly reset' 'Account'
-  printf '%s\n' '-------------------------------------------------------------------------------'
-  awk -F '\t' '
+  printf '%s\n' '--------------------------------------------------------------------------------'
+  printf '%-26s %-6s %-8s %-11s %-18s\n' 'Profile' '5h' 'Weekly' '5h reset' 'Weekly reset'
+  printf '%s\n' '--------------------------------------------------------------------------------'
+  awk -F '\t' -v recommended="$recommended" '
+    function clip(value, width) {
+      if (length(value) <= width) return value
+      if (width <= 1) return substr(value, 1, width)
+      return substr(value, 1, width - 1) "~"
+    }
+    function label(profile, tier) {
+      if (tier == "" || tier == "unknown") return profile
+      return profile " (" tier ")"
+    }
     $2 == "ERROR" {
-      printf "%-18s %-6s %-8s %-18s %-22s %s\n", $1, "ERR", "ERR", "-", "-", $3
+      marker = ($1 == recommended) ? "*" : " "
+      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker, clip($1, 24), "ERR", "ERR", "-", "-"
       next
     }
     {
-      printf "%-18s %-6s %-8s %-18s %-22s %s\n", $1, $2 "%", $3 "%", $4, $5, $7
+      marker = ($1 == recommended) ? "*" : " "
+      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker, clip(label($1, $7), 24), $2 "%", $3 "%", clip($4, 11), clip($5, 18)
     }
   ' "$rows_file"
-  printf '%s\n\n' '-------------------------------------------------------------------------------'
+  printf '%s\n' '--------------------------------------------------------------------------------'
+  if [[ -n "$recommended" ]]; then
+    printf '* recommended rotate target\n'
+  fi
+  printf '\n'
 }
 
-cmd_profiles() {
+cmd_list() {
   profile_names
+}
+
+best_profile_from_rows() {
+  local rows_file="$1"
+
+  awk -F '\t' '
+    $2 != "ERROR" {
+      score = $6 + 0
+      five = $2 + 0
+      weekly = $3 + 0
+      if (!seen || score > best_score || (score == best_score && five > best_five) || (score == best_score && five == best_five && weekly > best_weekly)) {
+        seen = 1
+        best = $1
+        best_score = score
+        best_five = five
+        best_weekly = weekly
+      }
+    }
+    END {
+      if (seen) print best
+    }
+  ' "$rows_file"
 }
 
 cmd_use() {
@@ -286,24 +327,51 @@ cmd_use() {
 
 cmd_get() {
   require_common
-  local rows_file profiles profile failed=0
+  local rows_file tmp_dir profiles profile output session pid i failed=0
+  local -a result_files=()
+  local -a result_profiles=()
+  local -a pids=()
   ACTIVE_SESSIONS=()
   trap cleanup_sessions EXIT
 
   rows_file="$(mktemp)"
+  tmp_dir="$(mktemp -d)"
   profiles="$(profile_names)"
   [[ -n "$profiles" ]] || die "no profiles found in $(profiles_dir)"
 
-  info "retrieving account limits..."
+  info "retrieving account limits in parallel..."
   while IFS= read -r profile; do
     [[ -n "$profile" ]] || continue
+    output="$(mktemp "$tmp_dir/result.XXXXXX")"
+    session="$(safe_session_name "${APP_NAME}_${profile}_$(profile_hash "$profile")_$$")"
+    ACTIVE_SESSIONS+=("$session")
+    result_files+=("$output")
+    result_profiles+=("$profile")
     info "checking profile: $profile"
-    if ! get_one_profile "$profile" >>"$rows_file"; then
-      failed=1
-    fi
+    get_one_profile "$profile" "$session" >"$output" &
+    pid="$!"
+    pids+=("$pid")
   done <<<"$profiles"
 
-  render_table "$rows_file"
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      failed=1
+    fi
+  done
+
+  for (( i = 0; i < ${#result_files[@]}; i++ )); do
+    output="${result_files[$i]}"
+    profile="${result_profiles[$i]}"
+    if [[ -s "$output" ]]; then
+      cat "$output" >>"$rows_file"
+    else
+      printf '%s\tERROR\tProfile check failed before producing a result\n' "$profile" >>"$rows_file"
+    fi
+  done
+  rm -rf "$tmp_dir"
+
+  LAST_RECOMMENDED_PROFILE="$(best_profile_from_rows "$rows_file")"
+  render_table "$rows_file" "Codex Manager Limits" "$LAST_RECOMMENDED_PROFILE"
   LAST_ROWS_FILE="$rows_file"
   return "$failed"
 }
@@ -316,23 +384,7 @@ cmd_rotate() {
   rows_file="${LAST_ROWS_FILE:-}"
   [[ -n "$rows_file" && -f "$rows_file" ]] || die "could not read get results"
 
-  best_profile="$(awk -F '\t' '
-    $2 != "ERROR" {
-      score = $6 + 0
-      five = $2 + 0
-      weekly = $3 + 0
-      if (!seen || score > best_score || (score == best_score && five > best_five) || (score == best_score && five == best_five && weekly > best_weekly)) {
-        seen = 1
-        best = $1
-        best_score = score
-        best_five = five
-        best_weekly = weekly
-      }
-    }
-    END {
-      if (seen) print best
-    }
-  ' "$rows_file")"
+  best_profile="${LAST_RECOMMENDED_PROFILE:-$(best_profile_from_rows "$rows_file")}"
 
   [[ -n "$best_profile" ]] || die "no usable profile found"
   cmd_use "$best_profile"
@@ -346,7 +398,7 @@ main() {
     get) cmd_get "$@" ;;
     use) cmd_use "$@" ;;
     rotate) cmd_rotate "$@" ;;
-    profiles) cmd_profiles "$@" ;;
+    list) cmd_list "$@" ;;
     -h|--help|help|"") usage ;;
     *) usage; die "unknown command: $command" ;;
   esac

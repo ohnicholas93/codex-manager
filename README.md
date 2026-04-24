@@ -39,7 +39,7 @@ Example:
 ## Usage
 
 ```bash
-./codex-manager.sh profiles
+./codex-manager.sh list
 ./codex-manager.sh get
 ./codex-manager.sh use <name>
 ./codex-manager.sh rotate
@@ -47,12 +47,12 @@ Example:
 
 ## Commands
 
-### `profiles`
+### `list`
 
 Lists all available profiles from `$CODEX_HOME/profiles/*.json`.
 
 ```bash
-./codex-manager.sh profiles
+./codex-manager.sh list
 ```
 
 ### `use <name>`
@@ -72,7 +72,7 @@ CODEX_MANAGER_BACKUP=1 ./codex-manager.sh use gmail
 
 ### `get`
 
-Checks account limits for every profile.
+Checks account limits for every profile in parallel.
 
 For each profile, Codex Manager:
 
@@ -82,6 +82,7 @@ For each profile, Codex Manager:
 4. Runs `codex --yolo`.
 5. Polls `/status` until Codex reports refreshed limit data.
 6. Prints a per-profile table with 5h and weekly availability.
+7. Marks the recommended rotate target with `*`.
 
 ```bash
 ./codex-manager.sh get
@@ -125,14 +126,14 @@ You can run the script directly:
 
 ```bash
 chmod +x codex-manager.sh
-./codex-manager.sh profiles
+./codex-manager.sh list
 ```
 
 Or symlink it somewhere on your `PATH`:
 
 ```bash
 ln -s "$PWD/codex-manager.sh" ~/.local/bin/codex-manager
-codex-manager profiles
+codex-manager list
 ```
 
 ## Notes
