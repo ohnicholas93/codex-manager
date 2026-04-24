@@ -32,8 +32,8 @@ Example:
 ## Requirements
 
 - `bash`
-- `tmux`
-- `codex`
+- `curl` for fast direct limit checks
+- `tmux` and `codex` as fallback when direct checks are unavailable or fail
 - Standard Unix utilities: `find`, `sed`, `awk`, `cp`, `rm`, `install`
 
 ## Usage
@@ -76,7 +76,12 @@ CODEX_MANAGER_BACKUP=1 ./codex-manager.sh use gmail
 
 Checks account limits for every profile in parallel.
 
-For each profile, Codex Manager:
+When `curl` is available, Codex Manager reads each profile JSON and calls the
+same Codex usage endpoint directly. This avoids launching Codex sessions and is
+the preferred path.
+
+If direct checking is unavailable or fails for a profile, Codex Manager falls
+back to the tmux strategy. For that fallback, it:
 
 1. Creates an isolated temp Codex home at `${XDG_CACHE_HOME:-~/.cache}/codex-manager/<profile>/`.
 2. Copies the profile JSON to that temp home as `auth.json`.
@@ -93,8 +98,8 @@ For each profile, Codex Manager:
 ./codex-manager.sh get
 ```
 
-This command launches real Codex sessions, so it may create live session
-activity for each account.
+The direct path does not modify profiles and does not use `jq`. The tmux
+fallback may create live Codex session activity for accounts that need fallback.
 
 ### `rotate`
 
@@ -122,9 +127,12 @@ Ties prefer the higher 5h value, then the higher weekly value.
 | `CODEX_MANAGER_READY_TIMEOUT` | `60` | Seconds to wait for Codex startup. |
 | `CODEX_MANAGER_STATUS_TIMEOUT` | `90` | Seconds to wait for refreshed limits. |
 | `CODEX_MANAGER_STATUS_INTERVAL` | `1` | Seconds between `/status` attempts. |
-| `CODEX_MANAGER_STATUS_KEY_DELAY` | `0.2` | Delay before pressing Enter after typing `/status`. |
+| `CODEX_MANAGER_STATUS_KEY_DELAY` | `0.5` | Delay before pressing Enter after typing `/status`. |
 | `CODEX_MANAGER_TMUX_WIDTH` | `160` | Detached tmux pane width used for status rendering. |
 | `CODEX_MANAGER_TMUX_HEIGHT` | `40` | Detached tmux pane height used for status rendering. |
+| `CODEX_MANAGER_DIRECT_TIMEOUT` | `20` | Seconds to wait for direct usage API response. |
+| `CODEX_MANAGER_DIRECT_CONNECT_TIMEOUT` | `5` | Seconds to wait for direct usage API connection. |
+| `CODEX_MANAGER_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage` | Direct usage endpoint. |
 | `CODEX_MANAGER_BACKUP` | `0` | Set to `1` to back up active `auth.json` before `use` or `rotate`. |
 
 ## Installing

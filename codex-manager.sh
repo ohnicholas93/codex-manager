@@ -11,6 +11,9 @@ STATUS_INTERVAL="${CODEX_MANAGER_STATUS_INTERVAL:-1}"
 STATUS_KEY_DELAY="${CODEX_MANAGER_STATUS_KEY_DELAY:-0.5}"
 TMUX_WIDTH="${CODEX_MANAGER_TMUX_WIDTH:-160}"
 TMUX_HEIGHT="${CODEX_MANAGER_TMUX_HEIGHT:-40}"
+DIRECT_TIMEOUT="${CODEX_MANAGER_DIRECT_TIMEOUT:-20}"
+DIRECT_CONNECT_TIMEOUT="${CODEX_MANAGER_DIRECT_CONNECT_TIMEOUT:-5}"
+USAGE_URL="${CODEX_MANAGER_USAGE_URL:-https://chatgpt.com/backend-api/wham/usage}"
 
 usage() {
   cat <<'EOF'
@@ -29,6 +32,10 @@ Environment:
   CODEX_MANAGER_STATUS_KEY_DELAY     Delay before Enter after typing /status, default 0.5
   CODEX_MANAGER_TMUX_WIDTH           Detached tmux pane width, default 160
   CODEX_MANAGER_TMUX_HEIGHT          Detached tmux pane height, default 40
+  CODEX_MANAGER_DIRECT_TIMEOUT       Seconds to wait for direct API response, default 20
+  CODEX_MANAGER_DIRECT_CONNECT_TIMEOUT
+                                      Seconds to wait for direct API connect, default 5
+  CODEX_MANAGER_USAGE_URL            Direct usage endpoint, default ChatGPT Codex usage API
   CODEX_MANAGER_BACKUP=1             Back up auth.json before use/rotate
 
 Profiles:
@@ -91,6 +98,13 @@ profiles_dir() {
 require_common() {
   have tmux || die "tmux is required"
   have codex || die "codex is required"
+}
+
+require_get_support() {
+  if have curl; then
+    return 0
+  fi
+  require_common
 }
 
 profile_path() {
@@ -250,7 +264,239 @@ parse_status() {
   return 0
 }
 
-get_one_profile() {
+json_string_field() {
+  local json="$1"
+  local key="$2"
+
+  sed -nE 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' <<<"$json" | tail -n 1
+}
+
+json_number_field() {
+  local json="$1"
+  local key="$2"
+
+  sed -nE 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p' <<<"$json" | tail -n 1
+}
+
+json_numeric_field() {
+  local json="$1"
+  local key="$2"
+
+  sed -nE 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*([0-9]+([.][0-9]+)?).*/\1/p' <<<"$json" | tail -n 1
+}
+
+json_object_field() {
+  local json="$1"
+  local key="$2"
+
+  awk -v key="$key" '
+    BEGIN { RS = "\0" }
+    {
+      pattern = "\"" key "\"[[:space:]]*:[[:space:]]*\\{"
+      if (!match($0, pattern)) {
+        exit
+      }
+
+      start = RSTART + RLENGTH - 1
+      depth = 0
+      in_string = 0
+      escaped = 0
+
+      for (i = start; i <= length($0); i++) {
+        ch = substr($0, i, 1)
+
+        if (escaped) {
+          escaped = 0
+          continue
+        }
+        if (ch == "\\" && in_string) {
+          escaped = 1
+          continue
+        }
+        if (ch == "\"") {
+          in_string = !in_string
+          continue
+        }
+        if (in_string) {
+          continue
+        }
+
+        if (ch == "{") {
+          depth++
+        } else if (ch == "}") {
+          depth--
+          if (depth == 0) {
+            print substr($0, start, i - start + 1)
+            exit
+          }
+        }
+      }
+    }
+  ' <<<"$json"
+}
+
+curl_config_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+clamp_percent_left() {
+  local used="$1"
+  [[ "$used" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 1
+  awk -v used="$used" '
+    BEGIN {
+      left = 100 - used
+      if (left < 0) left = 0
+      if (left > 100) left = 100
+      printf "%.0f", left
+    }
+  '
+}
+
+format_epoch_reset() {
+  local reset_at="$1"
+  local window_seconds="$2"
+  local format
+
+  [[ "$reset_at" =~ ^[0-9]+$ ]] || {
+    printf 'unknown'
+    return
+  }
+
+  if [[ "$window_seconds" =~ ^[0-9]+$ && "$window_seconds" -gt 86400 ]]; then
+    format='+%H:%M on %d %b'
+  else
+    format='+%H:%M'
+  fi
+
+  date -d "@$reset_at" "$format" 2>/dev/null \
+    || date -r "$reset_at" "$format" 2>/dev/null \
+    || printf 'unknown'
+}
+
+title_case() {
+  local value="$1"
+  [[ -n "$value" ]] || {
+    printf 'unknown'
+    return
+  }
+  awk '{ print toupper(substr($0, 1, 1)) substr($0, 2) }' <<<"$value"
+}
+
+first_json_object_field() {
+  local json="$1"
+  shift
+  local key value
+
+  for key in "$@"; do
+    value="$(json_object_field "$json" "$key")"
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+
+  return 0
+}
+
+first_json_number_field() {
+  local json="$1"
+  shift
+  local key value
+
+  for key in "$@"; do
+    value="$(json_number_field "$json" "$key")"
+    if [[ -n "$value" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+
+  return 0
+}
+
+window_seconds() {
+  local window="$1"
+  local seconds minutes
+
+  seconds="$(json_number_field "$window" "limit_window_seconds")"
+  if [[ -n "$seconds" ]]; then
+    printf '%s' "$seconds"
+    return
+  fi
+
+  minutes="$(json_number_field "$window" "window_minutes")"
+  if [[ -n "$minutes" ]]; then
+    printf '%s' "$((minutes * 60))"
+    return
+  fi
+
+  printf ''
+}
+
+get_one_profile_direct() {
+  local profile="$1"
+  local source auth_json access_token account_id response
+  local primary secondary plan tier five_used weekly_used five_percent weekly_percent
+  local five_reset_at weekly_reset_at five_window weekly_window five_reset weekly_reset score
+
+  have curl || return 1
+
+  source="$(profile_path "$profile")"
+  [[ -f "$source" ]] || die "profile does not exist: $source"
+
+  auth_json="$(tr -d '\n\r' <"$source")"
+  access_token="$(json_string_field "$auth_json" "access_token")"
+  account_id="$(json_string_field "$auth_json" "account_id")"
+  [[ -n "$access_token" ]] || return 1
+
+  response="$(
+    {
+      printf 'header = "Authorization: Bearer %s"\n' "$(curl_config_escape "$access_token")"
+      if [[ -n "$account_id" ]]; then
+        printf 'header = "ChatGPT-Account-ID: %s"\n' "$(curl_config_escape "$account_id")"
+      fi
+      printf 'header = "User-Agent: codex-cli"\n'
+    } | curl -fsS \
+      --connect-timeout "$DIRECT_CONNECT_TIMEOUT" \
+      --max-time "$DIRECT_TIMEOUT" \
+      --config - \
+      "$USAGE_URL" 2>/dev/null
+  )" || return 1
+  response="$(tr -d '\n\r' <<<"$response")"
+
+  primary="$(first_json_object_field "$response" "primary_window" "primary")"
+  secondary="$(first_json_object_field "$response" "secondary_window" "secondary")"
+  [[ -n "$primary" && -n "$secondary" ]] || return 1
+
+  five_used="$(json_numeric_field "$primary" "used_percent")"
+  weekly_used="$(json_numeric_field "$secondary" "used_percent")"
+  five_percent="$(clamp_percent_left "$five_used")" || return 1
+  weekly_percent="$(clamp_percent_left "$weekly_used")" || return 1
+
+  five_reset_at="$(first_json_number_field "$primary" "reset_at" "resets_at")"
+  weekly_reset_at="$(first_json_number_field "$secondary" "reset_at" "resets_at")"
+  five_window="$(window_seconds "$primary")"
+  weekly_window="$(window_seconds "$secondary")"
+  five_reset="$(format_epoch_reset "$five_reset_at" "$five_window")"
+  weekly_reset="$(format_epoch_reset "$weekly_reset_at" "$weekly_window")"
+  plan="$(json_string_field "$response" "plan_type")"
+  tier="$(title_case "$plan")"
+  score=$(( five_percent < weekly_percent ? five_percent : weekly_percent ))
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$profile" \
+    "$five_percent" \
+    "$weekly_percent" \
+    "$five_reset" \
+    "$weekly_reset" \
+    "$score" \
+    "$tier"
+}
+
+get_one_profile_tmux() {
   local profile="$1"
   local session="${2:-}"
   local source tmp_home command elapsed pane
@@ -300,6 +546,23 @@ get_one_profile() {
   done
 
   printf '%s\tERROR\tLimits did not refresh within %ss\n' "$profile" "$STATUS_TIMEOUT"
+  return 1
+}
+
+get_one_profile() {
+  local profile="$1"
+  local session="${2:-}"
+
+  if get_one_profile_direct "$profile"; then
+    return 0
+  fi
+
+  if have tmux && have codex; then
+    get_one_profile_tmux "$profile" "$session"
+    return
+  fi
+
+  printf '%s\tERROR\tDirect check failed and tmux/codex fallback is unavailable\n' "$profile"
   return 1
 }
 
@@ -465,7 +728,7 @@ cmd_use() {
 }
 
 cmd_get() {
-  require_common
+  require_get_support
   local rows_file tmp_dir profiles profile output session tmp_home pid i failed=0
   local -a result_files=()
   local -a result_profiles=()
@@ -483,7 +746,11 @@ cmd_get() {
   profiles="$(profile_names)"
   [[ -n "$profiles" ]] || die "no profiles found in $(profiles_dir)"
 
-  info "retrieving account limits in parallel..."
+  if have curl; then
+    info "retrieving account limits in parallel with direct API checks..."
+  else
+    info "retrieving account limits in parallel with tmux fallback..."
+  fi
   while IFS= read -r profile; do
     [[ -n "$profile" ]] || continue
     output="$(mktemp "$tmp_dir/result.XXXXXX")"
@@ -524,7 +791,7 @@ cmd_get() {
 }
 
 cmd_rotate() {
-  require_common
+  require_get_support
   local rows_file best_profile
 
   cmd_get || true
