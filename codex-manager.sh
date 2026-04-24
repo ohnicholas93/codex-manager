@@ -161,6 +161,21 @@ tmux_capture() {
   tmux capture-pane -t "$session" -p -S -2000 2>/dev/null || true
 }
 
+latest_status_block() {
+  awk '
+    /OpenAI Codex/ {
+      block = ""
+      seen = 1
+    }
+    seen {
+      block = block $0 ORS
+    }
+    END {
+      printf "%s", block
+    }
+  '
+}
+
 wait_until_ready() {
   local session="$1"
   local elapsed=0
@@ -179,10 +194,16 @@ wait_until_ready() {
 }
 
 parse_status() {
-  local pane="$1"
+  local pane
   local profile="$2"
   local account tier five_line weekly_line
   local five_percent weekly_percent five_reset weekly_reset
+
+  pane="$(latest_status_block <<<"$1")"
+  [[ -n "$pane" ]] || return 1
+  if grep -Fqi 'limits may be stale - run /status again shortly' <<<"$pane"; then
+    return 1
+  fi
 
   five_line="$(grep -E '5h limit:' <<<"$pane" | tail -n 1 || true)"
   weekly_line="$(grep -E 'Weekly limit:' <<<"$pane" | tail -n 1 || true)"
@@ -319,7 +340,7 @@ render_table() {
 
   printf '\n%s\n' "$title"
   printf '%s\n' '--------------------------------------------------------------------------------'
-  printf '%-26s %-6s %-8s %-11s %-18s\n' 'Profile' '5h' 'Weekly' '5h reset' 'Weekly reset'
+  printf '%-31s %-6s %-8s %-11s %-13s\n' 'Profile' '5h' 'Weekly' '5h reset' 'Weekly reset'
   printf '%s\n' '--------------------------------------------------------------------------------'
   awk -F '\t' -v recommended="$recommended" -v active_profiles="$active_profiles" '
     function clip(value, width) {
@@ -345,11 +366,11 @@ render_table() {
       return " "
     }
     $2 == "ERROR" {
-      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker($1), clip($1, 24), "ERR", "ERR", "-", "-"
+      printf "%s %-29s %-6s %-8s %-11s %-13s\n", marker($1), clip($1, 29), "ERR", "ERR", "-", "-"
       next
     }
     {
-      printf "%s %-24s %-6s %-8s %-11s %-18s\n", marker($1), clip(label($1, $7), 24), $2 "%", $3 "%", clip($4, 11), clip($5, 18)
+      printf "%s %-29s %-6s %-8s %-11s %-13s\n", marker($1), clip(label($1, $7), 29), $2 "%", $3 "%", clip($4, 11), clip($5, 13)
     }
   ' "$rows_file"
   printf '%s\n' '--------------------------------------------------------------------------------'
