@@ -235,7 +235,7 @@ get_one_profile() {
   } >"$tmp_home/config.toml"
   chmod 600 "$tmp_home/config.toml"
 
-  printf -v command 'cd %q && CODEX_HOME=%q codex --yolo' "$tmp_home" "$tmp_home"
+  printf -v command 'cd %q && CODEX_HOME=%q codex' "$tmp_home" "$tmp_home"
   tmux new-session -d -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT" -s "$session" "$command" >/dev/null
   ACTIVE_SESSIONS+=("$session")
 
