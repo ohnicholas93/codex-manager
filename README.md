@@ -122,17 +122,28 @@ Ties prefer the higher 5h value, then the higher weekly value.
 
 ## Installing
 
-You can run the script directly:
+Run the installer:
 
 ```bash
-chmod +x codex-manager.sh
-./codex-manager.sh list
+./install.sh
 ```
 
-Or symlink it somewhere on your `PATH`:
+It creates this symlink:
 
 ```bash
-ln -s "$PWD/codex-manager.sh" ~/.local/bin/codex-manager
+~/.local/bin/codex-manager -> ./codex-manager.sh
+```
+
+It also adds this line to `~/.bashrc` if it is not already present:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+After installing, restart your shell or run:
+
+```bash
+source ~/.bashrc
 codex-manager list
 ```
 
