@@ -81,6 +81,10 @@ When `curl` is available, Codex Manager reads each profile JSON and calls the
 same Codex usage endpoint directly. This avoids launching Codex sessions and is
 the preferred path.
 
+If the direct usage request fails and the profile contains a `refresh_token`,
+Codex Manager calls the ChatGPT OAuth refresh endpoint, persists any returned
+tokens back to the profile JSON, and retries the usage request once.
+
 If direct checking is unavailable or fails for a profile, Codex Manager falls
 back to the tmux strategy. For that fallback, it:
 
@@ -134,6 +138,7 @@ Ties prefer the higher 5h value, then the higher weekly value.
 | `CODEX_MANAGER_DIRECT_TIMEOUT` | `20` | Seconds to wait for direct usage API response. |
 | `CODEX_MANAGER_DIRECT_CONNECT_TIMEOUT` | `5` | Seconds to wait for direct usage API connection. |
 | `CODEX_MANAGER_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage` | Direct usage endpoint. |
+| `CODEX_REFRESH_TOKEN_URL_OVERRIDE` | `https://auth.openai.com/oauth/token` | Refresh token endpoint override. |
 | `CODEX_MANAGER_BACKUP` | `0` | Set to `1` to back up active `auth.json` before `use` or `rotate`. |
 
 ## Installing
@@ -166,6 +171,7 @@ codex-manager list
 ## Notes
 
 - Direct `get` does not modify the real `$CODEX_HOME/auth.json`.
+- Direct `get` can modify profile JSON files when refreshing expired access tokens.
 - Tmux fallback `get` can update profile files if Codex refreshes tokens.
 - `use` and `rotate` replace the real `$CODEX_HOME/auth.json` symlink.
 - Profile names must contain only letters, numbers, dots, underscores, or hyphens.

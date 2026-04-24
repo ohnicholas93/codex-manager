@@ -14,6 +14,8 @@ TMUX_HEIGHT="${CODEX_MANAGER_TMUX_HEIGHT:-40}"
 DIRECT_TIMEOUT="${CODEX_MANAGER_DIRECT_TIMEOUT:-20}"
 DIRECT_CONNECT_TIMEOUT="${CODEX_MANAGER_DIRECT_CONNECT_TIMEOUT:-5}"
 USAGE_URL="${CODEX_MANAGER_USAGE_URL:-https://chatgpt.com/backend-api/wham/usage}"
+REFRESH_URL="${CODEX_REFRESH_TOKEN_URL_OVERRIDE:-https://auth.openai.com/oauth/token}"
+CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann"
 
 usage() {
   cat <<'EOF'
@@ -36,6 +38,7 @@ Environment:
   CODEX_MANAGER_DIRECT_CONNECT_TIMEOUT
                                       Seconds to wait for direct API connect, default 5
   CODEX_MANAGER_USAGE_URL            Direct usage endpoint, default ChatGPT Codex usage API
+  CODEX_REFRESH_TOKEN_URL_OVERRIDE   Refresh token endpoint override
   CODEX_MANAGER_BACKUP=1             Back up auth.json before use/rotate
 
 Profiles:
@@ -342,6 +345,23 @@ curl_config_escape() {
   printf '%s' "$value"
 }
 
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+awk_replacement_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//&/\\&}"
+  printf '%s' "$value"
+}
+
 clamp_percent_left() {
   local used="$1"
   [[ "$used" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 1
@@ -436,35 +456,129 @@ window_seconds() {
   printf ''
 }
 
-get_one_profile_direct() {
-  local profile="$1"
-  local source auth_json access_token account_id response
-  local primary secondary plan tier five_used weekly_used five_percent weekly_percent
-  local five_reset_at weekly_reset_at five_window weekly_window five_reset weekly_reset score
+replace_json_string_field() {
+  local json="$1"
+  local key="$2"
+  local value="$3"
+  local replacement
+
+  replacement="\"$key\": \"$(json_escape "$value")\""
+  replacement="$(awk_replacement_escape "$replacement")"
+  awk -v key="$key" -v replacement="$replacement" '
+    BEGIN { RS = "\0"; ORS = "" }
+    {
+      pattern = "\"" key "\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\""
+      if (!sub(pattern, replacement)) {
+        exit 1
+      }
+      print
+    }
+  ' <<<"$json"
+}
+
+replace_or_add_last_refresh() {
+  local json="$1"
+  local value="$2"
+  local replacement
+
+  replacement="\"last_refresh\": \"$(json_escape "$value")\""
+  replacement="$(awk_replacement_escape "$replacement")"
+  awk -v replacement="$replacement" '
+    BEGIN { RS = "\0"; ORS = "" }
+    {
+      pattern = "\"last_refresh\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\""
+      if (sub(pattern, replacement)) {
+        print
+        exit
+      }
+      sub(/[[:space:]]*}[[:space:]]*$/, ", " replacement "}")
+      print
+    }
+  ' <<<"$json"
+}
+
+persist_refreshed_tokens() {
+  local source="$1"
+  local auth_json="$2"
+  local access_token="$3"
+  local refresh_token="$4"
+  local id_token="$5"
+  local updated tmp last_refresh
+
+  updated="$auth_json"
+  if [[ -n "$access_token" ]]; then
+    updated="$(replace_json_string_field "$updated" "access_token" "$access_token")" || return 1
+  fi
+  if [[ -n "$refresh_token" ]]; then
+    updated="$(replace_json_string_field "$updated" "refresh_token" "$refresh_token")" || return 1
+  fi
+  if [[ -n "$id_token" ]]; then
+    updated="$(replace_json_string_field "$updated" "id_token" "$id_token")" || return 1
+  fi
+
+  last_refresh="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  updated="$(replace_or_add_last_refresh "$updated" "$last_refresh")" || return 1
+
+  tmp="$(mktemp "$(dirname "$source")/.${APP_NAME}.auth.XXXXXX")"
+  chmod 600 "$tmp"
+  printf '%s\n' "$updated" >"$tmp"
+  mv "$tmp" "$source"
+}
+
+refresh_profile_token() {
+  local source="$1"
+  local auth_json="$2"
+  local old_refresh_token response access_token refresh_token id_token
 
   have curl || return 1
 
-  source="$(profile_path "$profile")"
-  [[ -f "$source" ]] || die "profile does not exist: $source"
-
-  auth_json="$(tr -d '\n\r' <"$source")"
-  access_token="$(json_string_field "$auth_json" "access_token")"
-  account_id="$(json_string_field "$auth_json" "account_id")"
-  [[ -n "$access_token" ]] || return 1
+  old_refresh_token="$(json_string_field "$auth_json" "refresh_token")"
+  [[ -n "$old_refresh_token" ]] || return 1
 
   response="$(
-    {
-      printf 'header = "Authorization: Bearer %s"\n' "$(curl_config_escape "$access_token")"
-      if [[ -n "$account_id" ]]; then
-        printf 'header = "ChatGPT-Account-ID: %s"\n' "$(curl_config_escape "$account_id")"
-      fi
-      printf 'header = "User-Agent: codex-cli"\n'
-    } | curl -fsS \
-      --connect-timeout "$DIRECT_CONNECT_TIMEOUT" \
-      --max-time "$DIRECT_TIMEOUT" \
-      --config - \
-      "$USAGE_URL" 2>/dev/null
+    printf '{"client_id":"%s","grant_type":"refresh_token","refresh_token":"%s"}' \
+      "$(json_escape "$CLIENT_ID")" \
+      "$(json_escape "$old_refresh_token")" |
+      curl -fsS \
+        --connect-timeout "$DIRECT_CONNECT_TIMEOUT" \
+        --max-time "$DIRECT_TIMEOUT" \
+        -H 'Content-Type: application/json' \
+        --data-binary @- \
+        "$REFRESH_URL" 2>/dev/null
   )" || return 1
+  response="$(tr -d '\n\r' <<<"$response")"
+
+  access_token="$(json_string_field "$response" "access_token")"
+  refresh_token="$(json_string_field "$response" "refresh_token")"
+  id_token="$(json_string_field "$response" "id_token")"
+  [[ -n "$access_token" || -n "$refresh_token" || -n "$id_token" ]] || return 1
+
+  persist_refreshed_tokens "$source" "$auth_json" "$access_token" "$refresh_token" "$id_token"
+}
+
+fetch_usage_response() {
+  local access_token="$1"
+  local account_id="$2"
+
+  {
+    printf 'header = "Authorization: Bearer %s"\n' "$(curl_config_escape "$access_token")"
+    if [[ -n "$account_id" ]]; then
+      printf 'header = "ChatGPT-Account-ID: %s"\n' "$(curl_config_escape "$account_id")"
+    fi
+    printf 'header = "User-Agent: codex-cli"\n'
+  } | curl -fsS \
+    --connect-timeout "$DIRECT_CONNECT_TIMEOUT" \
+    --max-time "$DIRECT_TIMEOUT" \
+    --config - \
+    "$USAGE_URL" 2>/dev/null
+}
+
+parse_usage_response() {
+  local profile="$1"
+  local response="$2"
+  local primary secondary plan tier five_used weekly_used five_percent weekly_percent
+  local five_reset_at weekly_reset_at five_window weekly_window five_reset weekly_reset score
+
   response="$(tr -d '\n\r' <<<"$response")"
 
   primary="$(first_json_object_field "$response" "primary_window" "primary")"
@@ -494,6 +608,36 @@ get_one_profile_direct() {
     "$weekly_reset" \
     "$score" \
     "$tier"
+}
+
+get_one_profile_direct() {
+  local profile="$1"
+  local source auth_json access_token account_id response
+
+  have curl || return 1
+
+  source="$(profile_path "$profile")"
+  [[ -f "$source" ]] || die "profile does not exist: $source"
+
+  auth_json="$(tr -d '\n\r' <"$source")"
+  access_token="$(json_string_field "$auth_json" "access_token")"
+  account_id="$(json_string_field "$auth_json" "account_id")"
+  [[ -n "$access_token" ]] || return 1
+
+  if response="$(fetch_usage_response "$access_token" "$account_id")"; then
+    parse_usage_response "$profile" "$response"
+    return
+  fi
+
+  refresh_profile_token "$source" "$auth_json" || return 1
+
+  auth_json="$(tr -d '\n\r' <"$source")"
+  access_token="$(json_string_field "$auth_json" "access_token")"
+  account_id="$(json_string_field "$auth_json" "account_id")"
+  [[ -n "$access_token" ]] || return 1
+
+  response="$(fetch_usage_response "$access_token" "$account_id")" || return 1
+  parse_usage_response "$profile" "$response"
 }
 
 get_one_profile_tmux() {
