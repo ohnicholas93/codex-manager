@@ -8,14 +8,16 @@ READY_TIMEOUT="${CODEX_MANAGER_READY_TIMEOUT:-60}"
 STATUS_TIMEOUT="${CODEX_MANAGER_STATUS_TIMEOUT:-90}"
 STATUS_INTERVAL="${CODEX_MANAGER_STATUS_INTERVAL:-1}"
 STATUS_KEY_DELAY="${CODEX_MANAGER_STATUS_KEY_DELAY:-0.2}"
+TMUX_WIDTH="${CODEX_MANAGER_TMUX_WIDTH:-160}"
+TMUX_HEIGHT="${CODEX_MANAGER_TMUX_HEIGHT:-40}"
 
 usage() {
   cat <<'EOF'
 Usage:
+  codex-manager.sh list
   codex-manager.sh get
   codex-manager.sh use <name>
   codex-manager.sh rotate
-  codex-manager.sh list
 
 Environment:
   CODEX_HOME                         Defaults to ~/.codex
@@ -24,6 +26,8 @@ Environment:
   CODEX_MANAGER_STATUS_TIMEOUT       Seconds to wait for refreshed limits, default 90
   CODEX_MANAGER_STATUS_INTERVAL      Seconds between /status attempts, default 1
   CODEX_MANAGER_STATUS_KEY_DELAY     Delay before Enter after typing /status, default 0.2
+  CODEX_MANAGER_TMUX_WIDTH           Detached tmux pane width, default 160
+  CODEX_MANAGER_TMUX_HEIGHT          Detached tmux pane height, default 40
   CODEX_MANAGER_BACKUP=1             Back up auth.json before use/rotate
 
 Profiles:
@@ -198,7 +202,7 @@ get_one_profile() {
   chmod 600 "$tmp_home/auth.json"
 
   printf -v command 'CODEX_HOME=%q codex --yolo' "$tmp_home"
-  tmux new-session -d -s "$session" "$command" >/dev/null
+  tmux new-session -d -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT" -s "$session" "$command" >/dev/null
   ACTIVE_SESSIONS+=("$session")
 
   if ! wait_until_ready "$session"; then
@@ -237,6 +241,25 @@ cleanup_sessions() {
   for session in "${ACTIVE_SESSIONS[@]:-}"; do
     tmux kill-session -t "$session" >/dev/null 2>&1 || true
   done
+}
+
+cleanup_paths() {
+  local path
+  for path in "${ACTIVE_TEMP_HOMES[@]:-}"; do
+    case "$path" in
+      "$TMP_ROOT"/*) rm -rf "$path" ;;
+    esac
+  done
+  for path in "${ACTIVE_TEMP_FILES[@]:-}"; do
+    case "$path" in
+      /tmp/*) rm -rf "$path" ;;
+    esac
+  done
+}
+
+cleanup_all() {
+  cleanup_sessions
+  cleanup_paths
 }
 
 render_table() {
@@ -327,15 +350,20 @@ cmd_use() {
 
 cmd_get() {
   require_common
-  local rows_file tmp_dir profiles profile output session pid i failed=0
+  local rows_file tmp_dir profiles profile output session tmp_home pid i failed=0
   local -a result_files=()
   local -a result_profiles=()
   local -a pids=()
   ACTIVE_SESSIONS=()
-  trap cleanup_sessions EXIT
+  ACTIVE_TEMP_HOMES=()
+  ACTIVE_TEMP_FILES=()
+  trap cleanup_all EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   rows_file="$(mktemp)"
   tmp_dir="$(mktemp -d)"
+  ACTIVE_TEMP_FILES+=("$rows_file" "$tmp_dir")
   profiles="$(profile_names)"
   [[ -n "$profiles" ]] || die "no profiles found in $(profiles_dir)"
 
@@ -344,7 +372,9 @@ cmd_get() {
     [[ -n "$profile" ]] || continue
     output="$(mktemp "$tmp_dir/result.XXXXXX")"
     session="$(safe_session_name "${APP_NAME}_${profile}_$(profile_hash "$profile")_$$")"
+    tmp_home="$(safe_temp_home "$profile")"
     ACTIVE_SESSIONS+=("$session")
+    ACTIVE_TEMP_HOMES+=("$tmp_home")
     result_files+=("$output")
     result_profiles+=("$profile")
     info "checking profile: $profile"

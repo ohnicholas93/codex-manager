@@ -118,6 +118,8 @@ Ties prefer the higher 5h value, then the higher weekly value.
 | `CODEX_MANAGER_STATUS_TIMEOUT` | `90` | Seconds to wait for refreshed limits. |
 | `CODEX_MANAGER_STATUS_INTERVAL` | `1` | Seconds between `/status` attempts. |
 | `CODEX_MANAGER_STATUS_KEY_DELAY` | `0.2` | Delay before pressing Enter after typing `/status`. |
+| `CODEX_MANAGER_TMUX_WIDTH` | `160` | Detached tmux pane width used for status rendering. |
+| `CODEX_MANAGER_TMUX_HEIGHT` | `40` | Detached tmux pane height used for status rendering. |
 | `CODEX_MANAGER_BACKUP` | `0` | Set to `1` to back up active `auth.json` before `use` or `rotate`. |
 
 ## Installing
@@ -152,4 +154,4 @@ codex-manager list
 - `get` does not modify the real `$CODEX_HOME/auth.json`.
 - `use` and `rotate` do modify the real `$CODEX_HOME/auth.json`.
 - Profile names must contain only letters, numbers, dots, underscores, or hyphens.
-- Detached tmux sessions created by `get` are cleaned up when the script exits.
+- Detached tmux sessions and temp files created by `get` are cleaned up when the script exits, including Ctrl+C.
