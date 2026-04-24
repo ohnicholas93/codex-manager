@@ -506,8 +506,7 @@ get_one_profile_tmux() {
 
   [[ -f "$source" ]] || die "profile does not exist: $source"
   reset_temp_home "$tmp_home"
-  cp "$source" "$tmp_home/auth.json"
-  chmod 600 "$tmp_home/auth.json"
+  ln -s "$source" "$tmp_home/auth.json"
   {
     printf '[projects."%s"]\n' "$(toml_escape "$tmp_home")"
     printf 'trust_level = "trusted"\n'
@@ -722,8 +721,7 @@ cmd_use() {
   fi
 
   rm -f "$target"
-  cp "$source" "$target"
-  chmod 600 "$target"
+  ln -s "$source" "$target"
   printf 'using profile: %s\n' "$name"
 }
 

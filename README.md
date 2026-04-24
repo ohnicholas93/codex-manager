@@ -34,7 +34,7 @@ Example:
 - `bash`
 - `curl` for fast direct limit checks
 - `tmux` and `codex` as fallback when direct checks are unavailable or fail
-- Standard Unix utilities: `find`, `sed`, `awk`, `cp`, `rm`, `install`
+- Standard Unix utilities: `find`, `sed`, `awk`, `cp`, `rm`, `ln`, `install`
 
 ## Usage
 
@@ -59,8 +59,9 @@ exactly matches a profile file.
 
 ### `use <name>`
 
-Activates a profile by replacing `$CODEX_HOME/auth.json` with
-`$CODEX_HOME/profiles/<name>.json`.
+Activates a profile by replacing `$CODEX_HOME/auth.json` with a symlink to
+`$CODEX_HOME/profiles/<name>.json`. This lets Codex token refreshes update the
+profile file itself.
 
 ```bash
 ./codex-manager.sh use gmail
@@ -84,7 +85,7 @@ If direct checking is unavailable or fails for a profile, Codex Manager falls
 back to the tmux strategy. For that fallback, it:
 
 1. Creates an isolated temp Codex home at `${XDG_CACHE_HOME:-~/.cache}/codex-manager/<profile>/`.
-2. Copies the profile JSON to that temp home as `auth.json`.
+2. Symlinks the profile JSON into that temp home as `auth.json`.
 3. Writes a temp `config.toml` that trusts that temp home.
 4. Starts a detached tmux session in that temp workspace.
 5. Runs `codex --yolo`.
@@ -164,7 +165,8 @@ codex-manager list
 
 ## Notes
 
-- `get` does not modify the real `$CODEX_HOME/auth.json`.
-- `use` and `rotate` do modify the real `$CODEX_HOME/auth.json`.
+- Direct `get` does not modify the real `$CODEX_HOME/auth.json`.
+- Tmux fallback `get` can update profile files if Codex refreshes tokens.
+- `use` and `rotate` replace the real `$CODEX_HOME/auth.json` symlink.
 - Profile names must contain only letters, numbers, dots, underscores, or hyphens.
 - Detached tmux sessions and temp files created by `get` are cleaned up when the script exits, including Ctrl+C.
