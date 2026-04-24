@@ -80,12 +80,13 @@ For each profile, Codex Manager:
 
 1. Creates an isolated temp Codex home at `/tmp/codex-manager/<profile>/`.
 2. Copies the profile JSON to `/tmp/codex-manager/<profile>/auth.json`.
-3. Starts a detached tmux session with that temp home.
-4. Runs `codex --yolo`.
-5. Polls `/status` until Codex reports refreshed limit data.
-6. Prints a per-profile table with 5h and weekly availability.
-7. Marks the recommended rotate target with `*`.
-8. Marks the currently active profile with `#` when `$CODEX_HOME/auth.json`
+3. Writes a temp `config.toml` that trusts `/tmp/codex-manager/<profile>/`.
+4. Starts a detached tmux session in that temp workspace.
+5. Runs `codex --yolo`.
+6. Polls `/status` until Codex reports refreshed limit data.
+7. Prints a per-profile table with 5h and weekly availability.
+8. Marks the recommended rotate target with `*`.
+9. Marks the currently active profile with `#` when `$CODEX_HOME/auth.json`
    exactly matches a profile file.
 
 ```bash

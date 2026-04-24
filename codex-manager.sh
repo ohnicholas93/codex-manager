@@ -7,7 +7,7 @@ TMP_ROOT="${CODEX_MANAGER_TMP_ROOT:-/tmp/codex-manager}"
 READY_TIMEOUT="${CODEX_MANAGER_READY_TIMEOUT:-60}"
 STATUS_TIMEOUT="${CODEX_MANAGER_STATUS_TIMEOUT:-90}"
 STATUS_INTERVAL="${CODEX_MANAGER_STATUS_INTERVAL:-1}"
-STATUS_KEY_DELAY="${CODEX_MANAGER_STATUS_KEY_DELAY:-0.2}"
+STATUS_KEY_DELAY="${CODEX_MANAGER_STATUS_KEY_DELAY:-0.5}"
 TMUX_WIDTH="${CODEX_MANAGER_TMUX_WIDTH:-160}"
 TMUX_HEIGHT="${CODEX_MANAGER_TMUX_HEIGHT:-40}"
 
@@ -25,7 +25,7 @@ Environment:
   CODEX_MANAGER_READY_TIMEOUT        Seconds to wait for Codex startup, default 60
   CODEX_MANAGER_STATUS_TIMEOUT       Seconds to wait for refreshed limits, default 90
   CODEX_MANAGER_STATUS_INTERVAL      Seconds between /status attempts, default 1
-  CODEX_MANAGER_STATUS_KEY_DELAY     Delay before Enter after typing /status, default 0.2
+  CODEX_MANAGER_STATUS_KEY_DELAY     Delay before Enter after typing /status, default 0.5
   CODEX_MANAGER_TMUX_WIDTH           Detached tmux pane width, default 160
   CODEX_MANAGER_TMUX_HEIGHT          Detached tmux pane height, default 40
   CODEX_MANAGER_BACKUP=1             Back up auth.json before use/rotate
@@ -65,6 +65,13 @@ parse_reset() {
   value="${value%%│*}"
   value="${value%%|*}"
   trim "$value"
+}
+
+toml_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
 }
 
 codex_home() {
@@ -161,7 +168,7 @@ wait_until_ready() {
 
   while (( elapsed < READY_TIMEOUT )); do
     pane="$(tmux_capture "$session")"
-    if [[ -n "$pane" && "$pane" != *"esc to interrupt"* ]]; then
+    if [[ "$pane" == *"OpenAI Codex"* && "$pane" != *"esc to interrupt"* ]]; then
       return 0
     fi
     sleep 1
@@ -222,8 +229,13 @@ get_one_profile() {
   reset_temp_home "$tmp_home"
   cp "$source" "$tmp_home/auth.json"
   chmod 600 "$tmp_home/auth.json"
+  {
+    printf '[projects."%s"]\n' "$(toml_escape "$tmp_home")"
+    printf 'trust_level = "trusted"\n'
+  } >"$tmp_home/config.toml"
+  chmod 600 "$tmp_home/config.toml"
 
-  printf -v command 'CODEX_HOME=%q codex --yolo' "$tmp_home"
+  printf -v command 'cd %q && CODEX_HOME=%q codex --yolo' "$tmp_home" "$tmp_home"
   tmux new-session -d -x "$TMUX_WIDTH" -y "$TMUX_HEIGHT" -s "$session" "$command" >/dev/null
   ACTIVE_SESSIONS+=("$session")
 
