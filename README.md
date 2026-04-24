@@ -78,9 +78,9 @@ Checks account limits for every profile in parallel.
 
 For each profile, Codex Manager:
 
-1. Creates an isolated temp Codex home at `/tmp/codex-manager/<profile>/`.
-2. Copies the profile JSON to `/tmp/codex-manager/<profile>/auth.json`.
-3. Writes a temp `config.toml` that trusts `/tmp/codex-manager/<profile>/`.
+1. Creates an isolated temp Codex home at `${XDG_CACHE_HOME:-~/.cache}/codex-manager/<profile>/`.
+2. Copies the profile JSON to that temp home as `auth.json`.
+3. Writes a temp `config.toml` that trusts that temp home.
 4. Starts a detached tmux session in that temp workspace.
 5. Runs `codex --yolo`.
 6. Polls `/status` until Codex reports refreshed limit data.
@@ -118,7 +118,7 @@ Ties prefer the higher 5h value, then the higher weekly value.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `CODEX_HOME` | `~/.codex` | Codex home containing `auth.json` and `profiles/`. |
-| `CODEX_MANAGER_TMP_ROOT` | `/tmp/codex-manager` | Temp root for isolated profile checks. |
+| `CODEX_MANAGER_TMP_ROOT` | `${XDG_CACHE_HOME:-~/.cache}/codex-manager` | Temp root for isolated profile checks. |
 | `CODEX_MANAGER_READY_TIMEOUT` | `60` | Seconds to wait for Codex startup. |
 | `CODEX_MANAGER_STATUS_TIMEOUT` | `90` | Seconds to wait for refreshed limits. |
 | `CODEX_MANAGER_STATUS_INTERVAL` | `1` | Seconds between `/status` attempts. |

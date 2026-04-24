@@ -3,7 +3,8 @@ set -Eeuo pipefail
 
 APP_NAME="codex-manager"
 DEFAULT_CODEX_HOME="$HOME/.codex"
-TMP_ROOT="${CODEX_MANAGER_TMP_ROOT:-/tmp/codex-manager}"
+CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+TMP_ROOT="${CODEX_MANAGER_TMP_ROOT:-$CACHE_HOME/codex-manager}"
 READY_TIMEOUT="${CODEX_MANAGER_READY_TIMEOUT:-60}"
 STATUS_TIMEOUT="${CODEX_MANAGER_STATUS_TIMEOUT:-90}"
 STATUS_INTERVAL="${CODEX_MANAGER_STATUS_INTERVAL:-1}"
@@ -21,7 +22,7 @@ Usage:
 
 Environment:
   CODEX_HOME                         Defaults to ~/.codex
-  CODEX_MANAGER_TMP_ROOT             Defaults to /tmp/codex-manager
+  CODEX_MANAGER_TMP_ROOT             Defaults to ${XDG_CACHE_HOME:-~/.cache}/codex-manager
   CODEX_MANAGER_READY_TIMEOUT        Seconds to wait for Codex startup, default 60
   CODEX_MANAGER_STATUS_TIMEOUT       Seconds to wait for refreshed limits, default 90
   CODEX_MANAGER_STATUS_INTERVAL      Seconds between /status attempts, default 1
@@ -163,12 +164,23 @@ tmux_capture() {
 
 latest_status_block() {
   awk '
-    /OpenAI Codex/ {
-      block = ""
-      seen = 1
+    /^╭/ {
+      candidate = $0 ORS
+      in_box = 1
+      has_codex = 0
+      next
     }
-    seen {
-      block = block $0 ORS
+    in_box {
+      candidate = candidate $0 ORS
+      if ($0 ~ /OpenAI Codex/) {
+        has_codex = 1
+      }
+      if ($0 ~ /^╰/) {
+        if (has_codex) {
+          block = candidate
+        }
+        in_box = 0
+      }
     }
     END {
       printf "%s", block
