@@ -51,7 +51,13 @@ cmd_get() {
     result_files+=("$output")
     result_profiles+=("$profile")
     info "checking profile: $profile"
-    get_one_profile "$profile" "$session" "$tmux_fallback" >"$output" &
+    (
+      trap - EXIT INT TERM
+      ACTIVE_SESSIONS=()
+      ACTIVE_TEMP_HOMES=()
+      ACTIVE_TEMP_FILES=()
+      get_one_profile "$profile" "$session" "$tmux_fallback"
+    ) >"$output" &
     pid="$!"
     pids+=("$pid")
   done <<<"$profiles"

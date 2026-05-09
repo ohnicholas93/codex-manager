@@ -11,7 +11,7 @@ parse_reset() {
 
 tmux_capture() {
   local session="$1"
-  tmux capture-pane -t "$session" -p -S -2000 2>/dev/null || true
+  tmux capture-pane -t "=$session" -p -S -2000 2>/dev/null || true
 }
 
 latest_status_block() {
@@ -130,9 +130,9 @@ get_one_profile_tmux() {
 
   elapsed=0
   while (( elapsed < STATUS_TIMEOUT )); do
-    tmux send-keys -t "$session" "/status" >/dev/null
+    tmux send-keys -t "=$session" "/status" >/dev/null
     sleep "$STATUS_KEY_DELAY"
-    tmux send-keys -t "$session" Enter >/dev/null
+    tmux send-keys -t "=$session" Enter >/dev/null
     sleep "$STATUS_INTERVAL"
     elapsed=$((elapsed + STATUS_INTERVAL))
 
@@ -180,7 +180,7 @@ get_one_profile() {
 cleanup_sessions() {
   local session
   for session in "${ACTIVE_SESSIONS[@]:-}"; do
-    tmux kill-session -t "$session" >/dev/null 2>&1 || true
+    tmux kill-session -t "=$session" >/dev/null 2>&1 || true
   done
 }
 
