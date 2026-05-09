@@ -157,9 +157,15 @@ get_one_profile_tmux() {
 get_one_profile() {
   local profile="$1"
   local session="${2:-}"
+  local tmux_fallback="${3:-0}"
 
   if get_one_profile_direct "$profile"; then
     return 0
+  fi
+
+  if [[ "$tmux_fallback" != "1" ]]; then
+    printf '%s\tERROR\tDirect check failed and tmux fallback is disabled\n' "$profile"
+    return 1
   fi
 
   if have tmux && have codex; then

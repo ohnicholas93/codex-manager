@@ -2,9 +2,13 @@ usage() {
   cat <<'EOF'
 Usage:
   codex-manager.sh list
-  codex-manager.sh get
+  codex-manager.sh get [--tmux-fallback|--no-tmux-fallback]
   codex-manager.sh use <name>
   codex-manager.sh rotate
+
+Options:
+  --tmux-fallback                    For get, fall back to tmux/codex when direct checks fail
+  --no-tmux-fallback                 For get, disable tmux fallback; this is the default
 
 Environment:
   CODEX_HOME                         Defaults to ~/.codex
@@ -85,8 +89,16 @@ require_common() {
 }
 
 require_get_support() {
+  local tmux_fallback="${1:-0}"
+
   if have curl; then
     return 0
   fi
-  require_common
+
+  if [[ "$tmux_fallback" == "1" ]]; then
+    require_common
+    return 0
+  fi
+
+  die "curl is required unless get is run with --tmux-fallback"
 }

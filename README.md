@@ -40,14 +40,14 @@ lib/               # implementation modules
 
 - `bash`
 - `curl` for fast direct limit checks
-- `tmux` and `codex` as fallback when direct checks are unavailable or fail
+- `tmux` and `codex` for optional fallback when direct checks fail
 - Standard Unix utilities: `find`, `sed`, `awk`, `cp`, `rm`, `ln`, `install`
 
 ## Usage
 
 ```bash
 ./codex-manager.sh list
-./codex-manager.sh get
+./codex-manager.sh get [--tmux-fallback|--no-tmux-fallback]
 ./codex-manager.sh use <name>
 ./codex-manager.sh rotate
 ```
@@ -92,8 +92,14 @@ If the direct usage request fails and the profile contains a `refresh_token`,
 Codex Manager calls the ChatGPT OAuth refresh endpoint, persists any returned
 tokens back to the profile JSON, and retries the usage request once.
 
-If direct checking is unavailable or fails for a profile, Codex Manager falls
-back to the tmux strategy. For that fallback, it:
+By default, direct checking failures are reported without launching Codex. To
+allow a tmux fallback for profiles whose direct check fails, run:
+
+```bash
+./codex-manager.sh get --tmux-fallback
+```
+
+For that fallback, Codex Manager:
 
 1. Creates an isolated temp Codex home at `${XDG_CACHE_HOME:-~/.cache}/codex-manager/<profile>/`.
 2. Symlinks the profile JSON into that temp home as `auth.json`.
@@ -112,7 +118,7 @@ back to the tmux strategy. For that fallback, it:
 
 The direct path does not use `jq`. It may update profile JSON files when token
 refresh is needed. The tmux fallback may create live Codex session activity for
-accounts that need fallback.
+accounts that need fallback, so it only runs when `--tmux-fallback` is passed.
 
 ### `rotate`
 
@@ -183,7 +189,7 @@ codex-manager list
 
 - Direct `get` does not modify the real `$CODEX_HOME/auth.json`.
 - Direct `get` can modify profile JSON files when refreshing expired access tokens.
-- Tmux fallback `get` can update profile files if Codex refreshes tokens.
+- `get --tmux-fallback` can update profile files if Codex refreshes tokens.
 - `use` and `rotate` replace the real `$CODEX_HOME/auth.json` symlink.
 - Profile names must contain only letters, numbers, dots, underscores, or hyphens.
 - Detached tmux sessions and temp files created by `get` are cleaned up when the script exits, including Ctrl+C.

@@ -1,5 +1,19 @@
 cmd_get() {
-  require_get_support
+  local tmux_fallback=0
+  while (($#)); do
+    case "$1" in
+      --tmux-fallback) tmux_fallback=1 ;;
+      --no-tmux-fallback) tmux_fallback=0 ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *) usage; die "unknown get option: $1" ;;
+    esac
+    shift
+  done
+
+  require_get_support "$tmux_fallback"
   local rows_file tmp_dir profiles profile output session tmp_home pid i failed=0
   local -a result_files=()
   local -a result_profiles=()
@@ -17,22 +31,27 @@ cmd_get() {
   profiles="$(profile_names)"
   [[ -n "$profiles" ]] || die "no profiles found in $(profiles_dir)"
 
-  if have curl; then
+  if [[ "$tmux_fallback" == "1" ]]; then
+    info "retrieving account limits in parallel with direct API checks and tmux fallback..."
+  elif have curl; then
     info "retrieving account limits in parallel with direct API checks..."
   else
-    info "retrieving account limits in parallel with tmux fallback..."
+    info "retrieving account limits in parallel with direct API checks..."
   fi
   while IFS= read -r profile; do
     [[ -n "$profile" ]] || continue
     output="$(mktemp "$tmp_dir/result.XXXXXX")"
-    session="$(safe_session_name "${APP_NAME}_${profile}_$(profile_hash "$profile")_$$")"
-    tmp_home="$(safe_temp_home "$profile")"
-    ACTIVE_SESSIONS+=("$session")
-    ACTIVE_TEMP_HOMES+=("$tmp_home")
+    session=""
+    if [[ "$tmux_fallback" == "1" ]]; then
+      session="$(safe_session_name "${APP_NAME}_${profile}_$(profile_hash "$profile")_$$")"
+      tmp_home="$(safe_temp_home "$profile")"
+      ACTIVE_SESSIONS+=("$session")
+      ACTIVE_TEMP_HOMES+=("$tmp_home")
+    fi
     result_files+=("$output")
     result_profiles+=("$profile")
     info "checking profile: $profile"
-    get_one_profile "$profile" "$session" >"$output" &
+    get_one_profile "$profile" "$session" "$tmux_fallback" >"$output" &
     pid="$!"
     pids+=("$pid")
   done <<<"$profiles"
@@ -62,7 +81,6 @@ cmd_get() {
 }
 
 cmd_rotate() {
-  require_get_support
   local rows_file best_profile
 
   cmd_get || true
