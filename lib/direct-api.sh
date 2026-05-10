@@ -11,6 +11,22 @@ clamp_percent_left() {
   '
 }
 
+json_has_required_profile_shape() {
+  local json="$1"
+  local tokens_json key
+
+  for key in auth_mode OPENAI_API_KEY tokens; do
+    json_object_has_key "$json" "$key" || return 1
+  done
+
+  tokens_json="$(json_object_field "$json" "tokens")"
+  [[ -n "$tokens_json" ]] || return 1
+
+  for key in id_token access_token refresh_token; do
+    json_object_has_key "$tokens_json" "$key" || return 1
+  done
+}
+
 format_epoch_reset() {
   local reset_at="$1"
   local window_seconds="$2"
@@ -132,11 +148,12 @@ persist_refreshed_tokens() {
 refresh_profile_token() {
   local source="$1"
   local auth_json="$2"
-  local old_refresh_token response access_token refresh_token id_token
+  local tokens_json old_refresh_token response access_token refresh_token id_token
 
   have curl || return 1
 
-  old_refresh_token="$(json_string_field "$auth_json" "refresh_token")"
+  tokens_json="$(json_object_field "$auth_json" "tokens")"
+  old_refresh_token="$(json_string_field "$tokens_json" "refresh_token")"
   [[ -n "$old_refresh_token" ]] || return 1
 
   response="$(
@@ -216,7 +233,7 @@ parse_usage_response() {
 
 get_one_profile_direct() {
   local profile="$1"
-  local source auth_json access_token account_id response
+  local source auth_json tokens_json access_token account_id response
 
   have curl || return 1
 
@@ -224,8 +241,14 @@ get_one_profile_direct() {
   [[ -f "$source" ]] || die "profile does not exist: $source"
 
   auth_json="$(tr -d '\n\r' <"$source")"
-  access_token="$(json_string_field "$auth_json" "access_token")"
-  account_id="$(json_string_field "$auth_json" "account_id")"
+  json_has_required_profile_shape "$auth_json" || {
+    printf '%s\t-\t-\t-\t-\t-\t-\n' "$profile"
+    return 0
+  }
+
+  tokens_json="$(json_object_field "$auth_json" "tokens")"
+  access_token="$(json_string_field "$tokens_json" "access_token")"
+  account_id="$(json_string_field "$tokens_json" "account_id")"
   [[ -n "$access_token" ]] || return 1
 
   if response="$(fetch_usage_response "$access_token" "$account_id")"; then
@@ -236,8 +259,9 @@ get_one_profile_direct() {
   refresh_profile_token "$source" "$auth_json" || return 1
 
   auth_json="$(tr -d '\n\r' <"$source")"
-  access_token="$(json_string_field "$auth_json" "access_token")"
-  account_id="$(json_string_field "$auth_json" "account_id")"
+  tokens_json="$(json_object_field "$auth_json" "tokens")"
+  access_token="$(json_string_field "$tokens_json" "access_token")"
+  account_id="$(json_string_field "$tokens_json" "account_id")"
   [[ -n "$access_token" ]] || return 1
 
   response="$(fetch_usage_response "$access_token" "$account_id")" || return 1

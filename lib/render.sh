@@ -50,6 +50,10 @@ render_table() {
       printf "%s %-29s %-6s %-8s %-11s %-13s\n", marker($1), clip($1, 29), "ERR", "ERR", "-", "-"
       next
     }
+    $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ {
+      printf "%s %-29s %-6s %-8s %-11s %-13s\n", marker($1), clip($1, 29), "-", "-", "-", "-"
+      next
+    }
     {
       printf "%s %-29s %-6s %-8s %-11s %-13s\n", marker($1), clip(label($1, $7), 29), $2 "%", $3 "%", clip($4, 11), clip($5, 16)
     }
@@ -71,7 +75,7 @@ best_profile_from_rows() {
   local rows_file="$1"
 
   awk -F '\t' '
-    $2 != "ERROR" {
+    $2 != "ERROR" && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $6 ~ /^[0-9]+$/ {
       score = $6 + 0
       five = $2 + 0
       weekly = $3 + 0
