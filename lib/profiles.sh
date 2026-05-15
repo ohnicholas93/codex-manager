@@ -233,10 +233,13 @@ for path in sorted(root.rglob("*")):
     if not write_changes:
         continue
 
+    original_stat = path.stat()
     tmp = path.with_name(path.name + ".tmp.codex-manager")
     try:
         tmp.write_text("".join(new_lines), encoding="utf-8")
+        os.chmod(tmp, original_stat.st_mode)
         os.replace(tmp, path)
+        os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
     except OSError:
         try:
             tmp.unlink()
