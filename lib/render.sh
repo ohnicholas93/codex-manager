@@ -6,7 +6,7 @@ render_table() {
   local active_profile has_plus=0 has_star=0 has_hash=0
 
   if [[ -n "$recommended" ]]; then
-    if grep -Fxq "$recommended" <<<"$active_profiles"; then
+    if grep -Fxq -- "$recommended" <<<"$active_profiles"; then
       has_plus=1
     else
       has_star=1

@@ -133,7 +133,7 @@ json_object_has_key() {
   local json="$1"
   local key="$2"
 
-  json_object_keys "$json" | grep -Fxq "$key"
+  json_object_keys "$json" | grep -Fxq -- "$key"
 }
 
 first_json_object_field() {

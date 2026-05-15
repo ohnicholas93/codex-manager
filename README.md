@@ -40,6 +40,7 @@ lib/               # implementation modules
 
 - `bash`
 - `curl` for fast direct limit checks
+- `python3` for moving session provider metadata
 - `tmux` and `codex` for optional fallback when direct checks fail
 - Standard Unix utilities: `find`, `sed`, `awk`, `cp`, `rm`, `ln`, `install`
 
@@ -48,7 +49,7 @@ lib/               # implementation modules
 ```bash
 ./codex-manager.sh list
 ./codex-manager.sh get [--tmux-fallback|--no-tmux-fallback]
-./codex-manager.sh use <name>
+./codex-manager.sh use [--move-sessions] <name>
 ./codex-manager.sh rotate
 ```
 
@@ -84,6 +85,20 @@ API-key-only profiles without a matching `[model_providers.<name>]` table leave
 ```bash
 ./codex-manager.sh use gmail
 ```
+
+When switching to a different provider, existing rollout files in
+`$CODEX_HOME/sessions/` keep their current `model_provider` unless you opt in.
+`use` prints how many sessions would change and recommends the exact command to
+rerun.
+
+To migrate those session files while activating the profile:
+
+```bash
+./codex-manager.sh use --move-sessions gmail
+```
+
+Custom provider targets write the profile name as the session provider. OpenAI
+subscription targets write `openai`.
 
 To back up the existing active `auth.json` before replacement:
 

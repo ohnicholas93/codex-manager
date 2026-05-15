@@ -3,10 +3,11 @@ usage() {
 Usage:
   codex-manager.sh list
   codex-manager.sh get [--tmux-fallback|--no-tmux-fallback]
-  codex-manager.sh use <name>
+  codex-manager.sh use [--move-sessions] <name>
   codex-manager.sh rotate
 
 Options:
+  --move-sessions                   For use, rewrite session providers in $CODEX_HOME/sessions
   --tmux-fallback                    For get, fall back to tmux/codex when direct checks fail
   --no-tmux-fallback                 For get, disable tmux fallback; this is the default
 
