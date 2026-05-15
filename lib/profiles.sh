@@ -471,6 +471,6 @@ cmd_use() {
     printf 'migrated %s sessions to provider: %s\n' "$migrated" "$target_provider"
   elif [[ "$provider_changed" == "1" && -n "$target_provider" ]]; then
     sessions_to_move="$(session_provider_change_count "$target_provider")"
-    printf 'provider changed; %s sessions would be moved. Run "codex-manager.sh use --move-sessions %s" to migrate them.\n' "$sessions_to_move" "$name"
+    printf 'provider changed; %s sessions would be moved. Run "codex-manager use --move-sessions %s" to migrate them.\n' "$sessions_to_move" "$name"
   fi
 }

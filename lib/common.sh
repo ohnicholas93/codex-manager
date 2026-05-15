@@ -1,10 +1,10 @@
 usage() {
   cat <<'EOF'
 Usage:
-  codex-manager.sh list
-  codex-manager.sh get [--tmux-fallback|--no-tmux-fallback]
-  codex-manager.sh use [--move-sessions] <name>
-  codex-manager.sh rotate
+  codex-manager list
+  codex-manager get [--tmux-fallback|--no-tmux-fallback]
+  codex-manager use [--move-sessions] <name>
+  codex-manager rotate
 
 Options:
   --move-sessions                   For use, rewrite session providers in $CODEX_HOME/sessions

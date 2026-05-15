@@ -47,10 +47,10 @@ lib/               # implementation modules
 ## Usage
 
 ```bash
-./codex-manager.sh list
-./codex-manager.sh get [--tmux-fallback|--no-tmux-fallback]
-./codex-manager.sh use [--move-sessions] <name>
-./codex-manager.sh rotate
+codex-manager list
+codex-manager get [--tmux-fallback|--no-tmux-fallback]
+codex-manager use [--move-sessions] <name>
+codex-manager rotate
 ```
 
 ## Commands
@@ -62,7 +62,7 @@ The currently active profile is marked with `#` when `$CODEX_HOME/auth.json`
 exactly matches a profile file.
 
 ```bash
-./codex-manager.sh list
+codex-manager list
 ```
 
 ### `use <name>`
@@ -83,7 +83,7 @@ API-key-only profiles without a matching `[model_providers.<name>]` table leave
 `config.toml` unchanged.
 
 ```bash
-./codex-manager.sh use gmail
+codex-manager use gmail
 ```
 
 When switching to a different provider, existing rollout files in
@@ -94,7 +94,7 @@ rerun.
 To migrate those session files while activating the profile:
 
 ```bash
-./codex-manager.sh use --move-sessions gmail
+codex-manager use --move-sessions gmail
 ```
 
 Custom provider targets write the profile name as the session provider. OpenAI
@@ -103,7 +103,7 @@ subscription targets write `openai`.
 To back up the existing active `auth.json` before replacement:
 
 ```bash
-CODEX_MANAGER_BACKUP=1 ./codex-manager.sh use gmail
+CODEX_MANAGER_BACKUP=1 codex-manager use gmail
 ```
 
 ### `get`
@@ -122,7 +122,7 @@ By default, direct checking failures are reported without launching Codex. To
 allow a tmux fallback for profiles whose direct check fails, run:
 
 ```bash
-./codex-manager.sh get --tmux-fallback
+codex-manager get --tmux-fallback
 ```
 
 For that fallback, Codex Manager:
@@ -139,7 +139,7 @@ For that fallback, Codex Manager:
    exactly matches a profile file.
 
 ```bash
-./codex-manager.sh get
+codex-manager get
 ```
 
 The direct path does not use `jq`. It may update profile JSON files when token
@@ -152,7 +152,7 @@ Runs `get`, chooses the best available profile, then activates it with
 `use <name>`.
 
 ```bash
-./codex-manager.sh rotate
+codex-manager rotate
 ```
 
 The selection score is:
