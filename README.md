@@ -70,6 +70,17 @@ Activates a profile by replacing `$CODEX_HOME/auth.json` with a symlink to
 `$CODEX_HOME/profiles/<name>.json`. This lets Codex token refreshes update the
 profile file itself.
 
+If `$CODEX_HOME/config.toml` contains `[model_providers.<name>]`, `use <name>`
+also sets the root `model_provider = "<name>"` entry. Existing commented
+root `model_provider` lines are uncommented and replaced when there is no
+active root `model_provider` line. If no root `model_provider` line exists, one
+is inserted at the top of the file.
+
+When switching back to a ChatGPT subscription profile, any active root
+`model_provider = ...` line is commented out so Codex uses OpenAI again.
+API-key-only profiles without a matching `[model_providers.<name>]` table leave
+`config.toml` unchanged.
+
 ```bash
 ./codex-manager.sh use gmail
 ```
