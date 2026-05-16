@@ -28,7 +28,7 @@ cmd_get() {
   rows_file="$(mktemp)"
   tmp_dir="$(mktemp -d)"
   ACTIVE_TEMP_FILES+=("$rows_file" "$tmp_dir")
-  profiles="$(profile_names)"
+  profiles="$(ordered_profile_names)"
   [[ -n "$profiles" ]] || die "no profiles found in $(profiles_dir)"
 
   if [[ "$tmux_fallback" == "1" ]]; then

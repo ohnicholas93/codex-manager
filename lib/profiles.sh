@@ -96,6 +96,22 @@ profile_provider_kind() {
   printf 'unknown\n'
 }
 
+ordered_profile_names() {
+  local profile file kind order
+
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    file="$(profile_path "$profile")"
+    kind="$(profile_provider_kind "$profile" "$file")"
+    case "$kind" in
+      openai) order=0 ;;
+      custom) order=1 ;;
+      *) order=2 ;;
+    esac
+    printf '%s\t%s\n' "$order" "$profile"
+  done < <(profile_names) | sort -t $'\t' -k1,1n -k2,2 | cut -f2-
+}
+
 active_profile_name() {
   local home dir auth auth_real dir_real profile file
   home="$(codex_home)"
@@ -384,7 +400,7 @@ cmd_list() {
       marker="#"
     fi
     printf '%s %s\n' "$marker" "$profile"
-  done < <(profile_names)
+  done < <(ordered_profile_names)
   printf '%s\n' '--------------------------------------------------------------------------------'
 
   if [[ -n "$active_profiles" ]]; then
