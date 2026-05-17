@@ -176,28 +176,32 @@ provider_name_for_kind() {
 
 session_provider_change_count() {
   local provider="$1"
-  session_provider_rewrite count "$(codex_home)/sessions" "$provider"
+  local move_window_days="$2"
+  session_provider_rewrite count "$(codex_home)/sessions" "$provider" "$move_window_days"
 }
 
 move_session_providers() {
   local provider="$1"
-  session_provider_rewrite write "$(codex_home)/sessions" "$provider"
+  local move_window_days="$2"
+  session_provider_rewrite write "$(codex_home)/sessions" "$provider" "$move_window_days"
 }
 
 session_provider_rewrite() {
   local mode="$1"
   local sessions_dir="$2"
   local provider="$3"
+  local move_window_days="$4"
 
   have python3 || die "python3 is required to rewrite session provider metadata"
 
-  python3 - "$mode" "$sessions_dir" "$provider" <<'PY'
+  python3 - "$mode" "$sessions_dir" "$provider" "$move_window_days" <<'PY'
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
-mode, sessions_dir, target_provider = sys.argv[1:4]
+mode, sessions_dir, target_provider, move_window_days_raw = sys.argv[1:5]
 write_changes = mode == "write"
 root = Path(sessions_dir)
 
@@ -205,10 +209,28 @@ if not root.is_dir():
     print(0)
     sys.exit(0)
 
+try:
+    move_window_days = int(move_window_days_raw)
+except ValueError:
+    print(f"invalid move window days: {move_window_days_raw}", file=sys.stderr)
+    sys.exit(2)
+
+cutoff_mtime = None
+if move_window_days >= 0:
+    cutoff_mtime = time.time() - (move_window_days * 86400)
+
 changed_sessions = 0
 
 for path in sorted(root.rglob("*")):
     if not path.is_file():
+        continue
+
+    try:
+        original_stat = path.stat()
+    except OSError:
+        continue
+
+    if cutoff_mtime is not None and original_stat.st_mtime < cutoff_mtime:
         continue
 
     try:
@@ -249,7 +271,6 @@ for path in sorted(root.rglob("*")):
     if not write_changes:
         continue
 
-    original_stat = path.stat()
     tmp = path.with_name(path.name + ".tmp.codex-manager")
     try:
         tmp.write_text("".join(new_lines), encoding="utf-8")
@@ -409,16 +430,34 @@ cmd_list() {
 }
 
 cmd_use() {
-  local name="" move_sessions=0
+  local name="" move_sessions=0 move_window_days=30 move_window_days_explicit=0
   local parsing_options=1
   local home source target backup target_kind current_provider target_provider
-  local provider_changed=0 sessions_to_move migrated
+  local provider_changed=0 sessions_to_move migrated move_command
 
   while (($#)); do
     if [[ "$parsing_options" == "1" ]]; then
       case "$1" in
         --move-sessions)
           move_sessions=1
+          shift
+          continue
+          ;;
+        --move-window-days)
+          shift
+          [[ $# -gt 0 ]] || die "--move-window-days requires a value"
+          [[ "$1" =~ ^-?[0-9]+$ ]] || die "--move-window-days must be an integer"
+          (( "$1" >= -1 )) || die "--move-window-days must be -1 or greater"
+          move_window_days="$1"
+          move_window_days_explicit=1
+          shift
+          continue
+          ;;
+        --move-window-days=*)
+          move_window_days="${1#*=}"
+          [[ "$move_window_days" =~ ^-?[0-9]+$ ]] || die "--move-window-days must be an integer"
+          (( move_window_days >= -1 )) || die "--move-window-days must be -1 or greater"
+          move_window_days_explicit=1
           shift
           continue
           ;;
@@ -483,10 +522,19 @@ cmd_use() {
   printf 'using profile: %s\n' "$name"
 
   if [[ "$move_sessions" == "1" ]]; then
-    migrated="$(move_session_providers "$target_provider")"
+    migrated="$(move_session_providers "$target_provider" "$move_window_days")"
     printf 'migrated %s sessions to provider: %s\n' "$migrated" "$target_provider"
   elif [[ "$provider_changed" == "1" && -n "$target_provider" ]]; then
-    sessions_to_move="$(session_provider_change_count "$target_provider")"
-    printf 'provider changed; %s sessions would be moved. Run "codex-manager use --move-sessions %s" to migrate them.\n' "$sessions_to_move" "$name"
+    sessions_to_move="$(session_provider_change_count "$target_provider" "$move_window_days")"
+    move_command="codex-manager use --move-sessions"
+    if [[ "$move_window_days_explicit" == "1" ]]; then
+      move_command="$move_command --move-window-days $move_window_days"
+    fi
+    move_command="$move_command $name"
+    if [[ "$move_window_days" == "-1" ]]; then
+      printf 'provider changed; %s sessions would be moved. Run "%s" to migrate them.\n' "$sessions_to_move" "$move_command"
+    else
+      printf 'provider changed; %s sessions from the last %s days would be moved. Run "%s" to migrate them.\n' "$sessions_to_move" "$move_window_days" "$move_command"
+    fi
   fi
 }

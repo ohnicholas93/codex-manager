@@ -49,7 +49,7 @@ lib/               # implementation modules
 ```bash
 codex-manager list
 codex-manager get [--tmux-fallback|--no-tmux-fallback]
-codex-manager use [--move-sessions] <name>
+codex-manager use [--move-sessions] [--move-window-days DAYS] <name>
 codex-manager rotate
 ```
 
@@ -95,6 +95,21 @@ To migrate those session files while activating the profile:
 
 ```bash
 codex-manager use --move-sessions gmail
+```
+
+By default, `--move-sessions` only migrates rollout files with an `mtime` in
+the last 30 days. Codex Manager preserves each file's original `mtime` after
+rewriting session metadata, so this uses the same timestamp Codex can rely on
+for last-edited ordering. To change the window:
+
+```bash
+codex-manager use --move-sessions --move-window-days 7 gmail
+```
+
+Use `-1` to migrate all sessions regardless of age:
+
+```bash
+codex-manager use --move-sessions --move-window-days -1 gmail
 ```
 
 Custom provider targets write the profile name as the session provider. OpenAI
