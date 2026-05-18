@@ -102,6 +102,15 @@ the last 30 days. Codex Manager preserves each file's original `mtime` after
 rewriting session metadata, so this uses the same timestamp Codex can rely on
 for last-edited ordering. To change the window:
 
+Before counting or rewriting rollouts, Codex Manager checks `/proc` for active
+Codex processes that already have the file open. Hot active rollouts are excluded
+from the count, rechecked immediately before replacement, skipped during
+migration, and reported instead of being replaced under a running writer. This is
+a best-effort guard because Codex does not currently provide a cooperative
+migration lock. If Codex Manager detects an active deleted rollout file
+descriptor, it warns that a previous live rewrite may already have detached
+persisted history.
+
 ```bash
 codex-manager use --move-sessions --move-window-days 7 gmail
 ```

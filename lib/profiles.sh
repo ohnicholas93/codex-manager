@@ -210,6 +210,11 @@ if not root.is_dir():
     sys.exit(0)
 
 try:
+    root_resolved = root.resolve()
+except OSError:
+    root_resolved = root.absolute()
+
+try:
     move_window_days = int(move_window_days_raw)
 except ValueError:
     print(f"invalid move window days: {move_window_days_raw}", file=sys.stderr)
@@ -220,6 +225,96 @@ if move_window_days >= 0:
     cutoff_mtime = time.time() - (move_window_days * 86400)
 
 changed_sessions = 0
+skipped_hot_sessions = 0
+skipped_changed_sessions = 0
+
+def process_looks_like_codex(proc):
+    try:
+        comm = (proc / "comm").read_text(errors="ignore").strip().lower()
+    except OSError:
+        comm = ""
+
+    if comm == "codex":
+        return True
+
+    try:
+        exe = os.readlink(proc / "exe")
+    except OSError:
+        exe = ""
+
+    if Path(exe).name.lower() == "codex":
+        return True
+
+    try:
+        cmdline = (proc / "cmdline").read_bytes()
+    except OSError:
+        return False
+
+    argv = [arg for arg in cmdline.split(b"\0") if arg]
+    if not argv:
+        return False
+
+    try:
+        argv0 = argv[0].decode("utf-8", errors="ignore")
+    except UnicodeDecodeError:
+        return False
+
+    if Path(argv0).name.lower() == "codex":
+        return True
+
+    return False
+
+def open_codex_rollout_state():
+    open_inodes = set()
+    deleted_rollouts = []
+    proc_root = Path("/proc")
+
+    if not proc_root.is_dir():
+        return open_inodes, deleted_rollouts
+
+    for proc in proc_root.iterdir():
+        if not proc.name.isdigit():
+            continue
+        if not process_looks_like_codex(proc):
+            continue
+
+        fd_dir = proc / "fd"
+        try:
+            fds = list(fd_dir.iterdir())
+        except OSError:
+            continue
+
+        for fd in fds:
+            try:
+                target = os.readlink(fd)
+            except OSError:
+                target = ""
+
+            if "rollout-" in target and target.endswith(".jsonl (deleted)"):
+                deleted_path = target[:-10]
+                try:
+                    if Path(deleted_path).resolve(strict=False).is_relative_to(root_resolved):
+                        deleted_rollouts.append((proc.name, target))
+                except OSError:
+                    pass
+
+            try:
+                fd_stat = fd.stat()
+            except OSError:
+                continue
+
+            open_inodes.add((fd_stat.st_dev, fd_stat.st_ino))
+
+    return open_inodes, deleted_rollouts
+
+open_rollout_inodes, deleted_rollout_fds = open_codex_rollout_state()
+
+def record_deleted_rollouts(items):
+    seen = set(deleted_rollout_fds)
+    for item in items:
+        if item not in seen:
+            deleted_rollout_fds.append(item)
+            seen.add(item)
 
 for path in sorted(root.rglob("*")):
     if not path.is_file():
@@ -267,22 +362,77 @@ for path in sorted(root.rglob("*")):
     if not session_changed:
         continue
 
-    changed_sessions += 1
+    if (original_stat.st_dev, original_stat.st_ino) in open_rollout_inodes:
+        skipped_hot_sessions += 1
+        action = "skipping" if write_changes else "excluding"
+        print(f"warning: {action} hot active Codex session rollout: {path}", file=sys.stderr)
+        continue
+
     if not write_changes:
+        changed_sessions += 1
         continue
 
     tmp = path.with_name(path.name + ".tmp.codex-manager")
     try:
         tmp.write_text("".join(new_lines), encoding="utf-8")
         os.chmod(tmp, original_stat.st_mode)
+
+        latest_open_rollout_inodes, latest_deleted_rollout_fds = open_codex_rollout_state()
+        record_deleted_rollouts(latest_deleted_rollout_fds)
+
+        try:
+            latest_stat = path.stat()
+        except OSError:
+            skipped_changed_sessions += 1
+            tmp.unlink()
+            print(f"warning: skipping session rollout that disappeared before rewrite: {path}", file=sys.stderr)
+            continue
+
+        if (latest_stat.st_dev, latest_stat.st_ino) != (original_stat.st_dev, original_stat.st_ino):
+            skipped_changed_sessions += 1
+            tmp.unlink()
+            print(f"warning: skipping session rollout that changed before rewrite: {path}", file=sys.stderr)
+            continue
+
+        if (latest_stat.st_dev, latest_stat.st_ino) in latest_open_rollout_inodes:
+            skipped_hot_sessions += 1
+            tmp.unlink()
+            print(f"warning: skipping hot active Codex session rollout: {path}", file=sys.stderr)
+            continue
+
         os.replace(tmp, path)
         os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        changed_sessions += 1
     except OSError:
         try:
             tmp.unlink()
         except OSError:
             pass
         raise
+
+if skipped_hot_sessions:
+    action = "skipped" if write_changes else "excluded"
+    print(
+        f"warning: {action} {skipped_hot_sessions} hot active Codex session(s); "
+        "close or resume them cleanly before migrating their provider metadata.",
+        file=sys.stderr,
+    )
+
+if skipped_changed_sessions:
+    print(
+        f"warning: skipped {skipped_changed_sessions} session rollout(s) that changed during migration; "
+        "rerun after active Codex sessions are closed.",
+        file=sys.stderr,
+    )
+
+if deleted_rollout_fds:
+    print(
+        "warning: detected active Codex rollout file descriptor(s) for deleted JSONL files; "
+        "a previous live rewrite may already have detached persisted history.",
+        file=sys.stderr,
+    )
+    for pid, target in deleted_rollout_fds:
+        print(f"warning: pid {pid} has deleted rollout fd: {target}", file=sys.stderr)
 
 print(changed_sessions)
 PY
