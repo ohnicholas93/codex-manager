@@ -588,12 +588,37 @@ cmd_use() {
   while (($#)); do
     if [[ "$parsing_options" == "1" ]]; then
       case "$1" in
-        --move-sessions)
+        --move)
           move_sessions=1
           shift
           continue
           ;;
+        --move-sessions)
+          info "warning: --move-sessions is deprecated; use --move instead"
+          move_sessions=1
+          shift
+          continue
+          ;;
+        --move-days)
+          shift
+          [[ $# -gt 0 ]] || die "--move-days requires a value"
+          [[ "$1" =~ ^-?[0-9]+$ ]] || die "--move-days must be an integer"
+          (( "$1" >= -1 )) || die "--move-days must be -1 or greater"
+          move_window_days="$1"
+          move_window_days_explicit=1
+          shift
+          continue
+          ;;
+        --move-days=*)
+          move_window_days="${1#*=}"
+          [[ "$move_window_days" =~ ^-?[0-9]+$ ]] || die "--move-days must be an integer"
+          (( move_window_days >= -1 )) || die "--move-days must be -1 or greater"
+          move_window_days_explicit=1
+          shift
+          continue
+          ;;
         --move-window-days)
+          info "warning: --move-window-days is deprecated; use --move-days instead"
           shift
           [[ $# -gt 0 ]] || die "--move-window-days requires a value"
           [[ "$1" =~ ^-?[0-9]+$ ]] || die "--move-window-days must be an integer"
@@ -604,6 +629,7 @@ cmd_use() {
           continue
           ;;
         --move-window-days=*)
+          info "warning: --move-window-days is deprecated; use --move-days instead"
           move_window_days="${1#*=}"
           [[ "$move_window_days" =~ ^-?[0-9]+$ ]] || die "--move-window-days must be an integer"
           (( move_window_days >= -1 )) || die "--move-window-days must be -1 or greater"
@@ -676,9 +702,9 @@ cmd_use() {
     printf 'migrated %s sessions to provider: %s\n' "$migrated" "$target_provider"
   elif [[ "$provider_changed" == "1" && -n "$target_provider" ]]; then
     sessions_to_move="$(session_provider_change_count "$target_provider" "$move_window_days")"
-    move_command="codex-manager use --move-sessions"
+    move_command="codex-manager use --move"
     if [[ "$move_window_days_explicit" == "1" ]]; then
-      move_command="$move_command --move-window-days $move_window_days"
+      move_command="$move_command --move-days $move_window_days"
     fi
     move_command="$move_command $name"
     if [[ "$move_window_days" == "-1" ]]; then

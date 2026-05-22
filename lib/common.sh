@@ -3,12 +3,12 @@ usage() {
 Usage:
   codex-manager list
   codex-manager get [--tmux-fallback|--no-tmux-fallback]
-  codex-manager use [--move-sessions] [--move-window-days DAYS] <name>
+  codex-manager use [--move] [--move-days DAYS] <name>
   codex-manager rotate
 
 Options:
-  --move-sessions                   For use, rewrite session providers in $CODEX_HOME/sessions
-  --move-window-days DAYS           For use --move-sessions, limit moved sessions by mtime; default 30, -1 means all
+  --move                            For use, rewrite session providers in $CODEX_HOME/sessions
+  --move-days DAYS                  For use --move, limit moved sessions by mtime; default 30, -1 means all
   --tmux-fallback                    For get, fall back to tmux/codex when direct checks fail
   --no-tmux-fallback                 For get, disable tmux fallback; this is the default
 
