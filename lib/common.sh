@@ -43,6 +43,54 @@ info() {
   printf '%s\n' "$*" >&2
 }
 
+table_min_width() {
+  printf '%s' 73
+}
+
+table_width() {
+  local width="${CODEX_MANAGER_TABLE_WIDTH:-80}"
+  local min_width
+
+  min_width="$(table_min_width)"
+  if [[ ! "$width" =~ ^[0-9]+$ ]] || (( width < min_width )); then
+    width="$min_width"
+  fi
+
+  printf '%s' "$width"
+}
+
+log_wrapped_list() {
+  local label="$1"
+  local entries="$2"
+  local width="${3:-$(table_width)}"
+  local indent line entry candidate prefix
+
+  indent="$(printf '%*s' "${#label}" '')"
+  line="$label"
+
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    prefix="$label"
+    [[ "$line" == "$label" ]] || prefix="$indent"
+
+    if [[ "$line" == "$prefix" ]]; then
+      candidate="${prefix}${entry}"
+    else
+      candidate="${line}, ${entry}"
+    fi
+
+    if (( ${#candidate} <= width )) || [[ "$line" == "$prefix" ]]; then
+      line="$candidate"
+      continue
+    fi
+
+    info "$line"
+    line="${indent}${entry}"
+  done <<<"$entries"
+
+  info "$line"
+}
+
 have() {
   command -v "$1" >/dev/null 2>&1
 }

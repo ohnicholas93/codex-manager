@@ -38,6 +38,7 @@ cmd_get() {
   else
     info "retrieving account limits in parallel with direct API checks..."
   fi
+  log_wrapped_list "checking profiles: " "$profiles"
   while IFS= read -r profile; do
     [[ -n "$profile" ]] || continue
     output="$(mktemp "$tmp_dir/result.XXXXXX")"
@@ -50,7 +51,6 @@ cmd_get() {
     fi
     result_files+=("$output")
     result_profiles+=("$profile")
-    info "checking profile: $profile"
     (
       trap - EXIT INT TERM
       ACTIVE_SESSIONS=()
