@@ -14,7 +14,7 @@ cmd_get() {
   done
 
   require_get_support "$tmux_fallback"
-  local rows_file tmp_dir profiles profile output session tmp_home pid i failed=0
+  local rows_file tmp_dir openai_profiles other_profiles profile output session tmp_home pid i failed=0
   local -a result_files=()
   local -a result_profiles=()
   local -a pids=()
@@ -28,8 +28,10 @@ cmd_get() {
   rows_file="$(mktemp)"
   tmp_dir="$(mktemp -d)"
   ACTIVE_TEMP_FILES+=("$rows_file" "$tmp_dir")
-  profiles="$(ordered_profile_names)"
-  [[ -n "$profiles" ]] || die "no profiles found in $(profiles_dir)"
+  openai_profiles="$(openai_profile_names)"
+  other_profiles="$(other_profile_names)"
+  [[ -n "$openai_profiles" || -n "$other_profiles" ]] || die "no profiles found in $(profiles_dir)"
+  [[ -n "$openai_profiles" ]] || die "no OpenAI profiles available to check; other providers: ${other_profiles//$'\n'/, }"
 
   if [[ "$tmux_fallback" == "1" ]]; then
     info "retrieving account limits in parallel with direct API checks and tmux fallback..."
@@ -38,7 +40,9 @@ cmd_get() {
   else
     info "retrieving account limits in parallel with direct API checks..."
   fi
-  log_wrapped_list "checking profiles: " "$profiles"
+  if [[ -n "$openai_profiles" ]]; then
+    log_wrapped_list "checking profiles: " "$openai_profiles"
+  fi
   while IFS= read -r profile; do
     [[ -n "$profile" ]] || continue
     output="$(mktemp "$tmp_dir/result.XXXXXX")"
@@ -60,7 +64,7 @@ cmd_get() {
     ) >"$output" &
     pid="$!"
     pids+=("$pid")
-  done <<<"$profiles"
+  done <<<"$openai_profiles"
 
   for pid in "${pids[@]}"; do
     if ! wait "$pid"; then
@@ -81,7 +85,7 @@ cmd_get() {
 
   ACTIVE_PROFILES="$(active_profile_names)"
   LAST_RECOMMENDED_PROFILE="$(best_profile_from_rows "$rows_file")"
-  render_table "$rows_file" "Codex Manager Limits" "$LAST_RECOMMENDED_PROFILE" "$ACTIVE_PROFILES"
+  render_table "$rows_file" "Codex Manager Limits" "$LAST_RECOMMENDED_PROFILE" "$ACTIVE_PROFILES" "$other_profiles"
   LAST_ROWS_FILE="$rows_file"
   return "$failed"
 }

@@ -59,7 +59,24 @@ table_width() {
   printf '%s' "$width"
 }
 
-log_wrapped_list() {
+clip_text() {
+  local value="$1"
+  local width="$2"
+
+  if (( ${#value} <= width )); then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  if (( width <= 1 )); then
+    printf '%s' "${value:0:width}"
+    return 0
+  fi
+
+  printf '%s~' "${value:0:width-1}"
+}
+
+print_wrapped_list() {
   local label="$1"
   local entries="$2"
   local width="${3:-$(table_width)}"
@@ -84,11 +101,15 @@ log_wrapped_list() {
       continue
     fi
 
-    info "$line"
+    printf '%s\n' "$line"
     line="${indent}${entry}"
   done <<<"$entries"
 
-  info "$line"
+  printf '%s\n' "$line"
+}
+
+log_wrapped_list() {
+  print_wrapped_list "$@" >&2
 }
 
 have() {

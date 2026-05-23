@@ -112,6 +112,39 @@ ordered_profile_names() {
   done < <(profile_names) | sort -t $'\t' -k1,1n -k2,2 | cut -f2-
 }
 
+openai_profile_names() {
+  local profile file
+
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    file="$(profile_path "$profile")"
+    [[ "$(profile_provider_kind "$profile" "$file")" == "openai" ]] || continue
+    printf '%s\n' "$profile"
+  done < <(ordered_profile_names)
+}
+
+custom_profile_names() {
+  local profile file
+
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    file="$(profile_path "$profile")"
+    [[ "$(profile_provider_kind "$profile" "$file")" == "custom" ]] || continue
+    printf '%s\n' "$profile"
+  done < <(ordered_profile_names)
+}
+
+other_profile_names() {
+  local profile file
+
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    file="$(profile_path "$profile")"
+    [[ "$(profile_provider_kind "$profile" "$file")" == "openai" ]] && continue
+    printf '%s\n' "$profile"
+  done < <(ordered_profile_names)
+}
+
 active_profile_name() {
   local home dir auth auth_real dir_real profile file
   home="$(codex_home)"
@@ -560,23 +593,12 @@ reset_temp_home() {
 }
 
 cmd_list() {
-  local active_profiles profile marker
+  local active_profiles openai_profiles other_profiles
   active_profiles="$(active_profile_names)"
+  openai_profiles="$(openai_profile_names)"
+  other_profiles="$(other_profile_names)"
 
-  printf '%s\n' '--------------------------------------------------------------------------------'
-  while IFS= read -r profile; do
-    [[ -n "$profile" ]] || continue
-    marker=" "
-    if grep -Fxq -- "$profile" <<<"$active_profiles"; then
-      marker="#"
-    fi
-    printf '%s %s\n' "$marker" "$profile"
-  done < <(ordered_profile_names)
-  printf '%s\n' '--------------------------------------------------------------------------------'
-
-  if [[ -n "$active_profiles" ]]; then
-    printf '# currently active profile\n'
-  fi
+  render_profile_list "$openai_profiles" "$other_profiles" "$active_profiles"
 }
 
 cmd_use() {
