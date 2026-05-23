@@ -597,6 +597,7 @@ cmd_list() {
   active_profiles="$(active_profile_names)"
   openai_profiles="$(openai_profile_names)"
   other_profiles="$(other_profile_names)"
+  [[ -n "$openai_profiles" || -n "$other_profiles" ]] || die "no profiles found in $(profiles_dir)"
 
   render_profile_list "$openai_profiles" "$other_profiles" "$active_profiles"
 }
