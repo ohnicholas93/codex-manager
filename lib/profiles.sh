@@ -219,6 +219,133 @@ move_session_providers() {
   session_provider_rewrite write "$(codex_home)/sessions" "$provider" "$move_window_days"
 }
 
+sync_thread_index_providers() {
+  local provider="$1"
+  local move_window_days="$2"
+
+  have python3 || die "python3 is required to sync thread provider metadata"
+
+  python3 - "$(codex_home)" "$(codex_home)/sessions" "$provider" "$move_window_days" <<'PY'
+import json
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+codex_home, sessions_dir, target_provider, move_window_days_raw = sys.argv[1:5]
+home = Path(codex_home)
+root = Path(sessions_dir)
+
+if not root.is_dir():
+    print(0)
+    sys.exit(0)
+
+try:
+    root_resolved = root.resolve()
+except OSError:
+    root_resolved = root.absolute()
+
+try:
+    move_window_days = int(move_window_days_raw)
+except ValueError:
+    print(f"invalid move window days: {move_window_days_raw}", file=sys.stderr)
+    sys.exit(2)
+
+cutoff_mtime = None
+if move_window_days >= 0:
+    cutoff_mtime = time.time() - (move_window_days * 86400)
+
+def is_under_sessions(path):
+    try:
+        path_resolved = path.resolve(strict=False)
+    except OSError:
+        path_resolved = path.absolute()
+    return path_resolved == root_resolved or root_resolved in path_resolved.parents
+
+def rollout_provider(path):
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+
+    if cutoff_mtime is not None and stat.st_mtime < cutoff_mtime:
+        return None
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            for line in file:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if item.get("type") != "session_meta":
+                    continue
+
+                payload = item.get("payload")
+                if isinstance(payload, dict):
+                    return payload.get("model_provider")
+                return None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    return None
+
+changed = 0
+for db_path in sorted(home.glob("state_*.sqlite")):
+    conn = None
+    db_changed = 0
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=5)
+        conn.execute("PRAGMA busy_timeout = 5000")
+        has_threads = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'threads'"
+        ).fetchone()
+        if not has_threads:
+            continue
+
+        rows = conn.execute(
+            "SELECT id, rollout_path, model_provider FROM threads WHERE model_provider != ?",
+            (target_provider,),
+        ).fetchall()
+
+        for thread_id, rollout_path, current_provider in rows:
+            if not rollout_path:
+                continue
+
+            path = Path(rollout_path)
+            if not path.is_absolute():
+                path = home / path
+
+            if not is_under_sessions(path):
+                continue
+
+            if rollout_provider(path) != target_provider:
+                continue
+
+            cursor = conn.execute(
+                "UPDATE threads SET model_provider = ? WHERE id = ? AND model_provider = ?",
+                (target_provider, thread_id, current_provider),
+            )
+            db_changed += cursor.rowcount
+
+        conn.commit()
+        changed += db_changed
+    except sqlite3.Error as error:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error:
+                pass
+        print(f"warning: could not sync Desktop thread index {db_path}: {error}", file=sys.stderr)
+    finally:
+        if conn is not None:
+            conn.close()
+
+print(changed)
+PY
+}
+
 session_provider_rewrite() {
   local mode="$1"
   local sessions_dir="$2"
@@ -606,7 +733,7 @@ cmd_use() {
   local name="" move_sessions=0 move_window_days=30 move_window_days_explicit=0
   local parsing_options=1
   local home source target backup target_kind current_provider target_provider
-  local provider_changed=0 sessions_to_move migrated move_command
+  local provider_changed=0 sessions_to_move migrated indexed move_command
 
   while (($#)); do
     if [[ "$parsing_options" == "1" ]]; then
@@ -723,6 +850,8 @@ cmd_use() {
   if [[ "$move_sessions" == "1" ]]; then
     migrated="$(move_session_providers "$target_provider" "$move_window_days")"
     printf 'migrated %s sessions to provider: %s\n' "$migrated" "$target_provider"
+    indexed="$(sync_thread_index_providers "$target_provider" "$move_window_days")"
+    printf 'updated %s indexed Desktop threads to provider: %s\n' "$indexed" "$target_provider"
   elif [[ "$provider_changed" == "1" && -n "$target_provider" ]]; then
     sessions_to_move="$(session_provider_change_count "$target_provider" "$move_window_days")"
     move_command="codex-manager use --move"

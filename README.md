@@ -87,20 +87,23 @@ codex-manager use gmail
 ```
 
 When switching to a different provider, existing rollout files in
-`$CODEX_HOME/sessions/` keep their current `model_provider` unless you opt in.
-`use` prints how many sessions would change and recommends the exact command to
-rerun.
+`$CODEX_HOME/sessions/` and the Desktop thread index keep their current
+`model_provider` unless you opt in. `use` prints how many sessions would change
+and recommends the exact command to rerun.
 
-To migrate those session files while activating the profile:
+To migrate those session files and indexed Desktop threads while activating the
+profile:
 
 ```bash
 codex-manager use --move gmail
 ```
 
-By default, `--move` only migrates rollout files with an `mtime` in
-the last 30 days. Codex Manager preserves each file's original `mtime` after
-rewriting session metadata, so this uses the same timestamp Codex can rely on
-for last-edited ordering. To change the window:
+By default, `--move` only migrates rollout files with an `mtime` in the last 30
+days. Codex Manager preserves each file's original `mtime` after rewriting
+session metadata, so this uses the same timestamp Codex can rely on for
+last-edited ordering. After the rollout rewrite, Codex Manager also updates
+matching rows in `$CODEX_HOME/state_*.sqlite` so Codex Desktop does not keep
+reopening moved threads through stale persisted provider metadata.
 
 Before counting or rewriting rollouts, Codex Manager checks `/proc` for active
 Codex processes that already have the file open. Hot active rollouts are excluded
