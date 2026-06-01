@@ -293,6 +293,22 @@ def replace_id_strings(value, id_map):
         return {key: replace_id_strings(item, id_map) for key, item in value.items()}
     return value
 
+def replace_source_ids(source, id_map):
+    if source is None:
+        return None, False
+    if not isinstance(source, str):
+        source = str(source)
+    if source in id_map:
+        return id_map[source], True
+    try:
+        parsed = json.loads(source)
+    except json.JSONDecodeError:
+        return source, False
+    replaced = replace_id_strings(parsed, id_map)
+    if replaced == parsed:
+        return source, False
+    return json.dumps(replaced, separators=(",", ":")), True
+
 def rotated_rollout_path(path, old_id, new_id):
     if old_id not in path.name:
         return path.with_name(f"{fallback_rollout_prefix(path)}{new_id}.jsonl")
@@ -392,9 +408,9 @@ def write_rotated_rollout(path, new_path, id_map):
         new_path.unlink(missing_ok=True)
         return False, f"write failed: {error}"
 
-def rotate_rollout(path, old_id, new_id):
+def rotate_rollout(path, old_id, new_id, id_map):
     new_path = rotated_rollout_path(path, old_id, new_id)
-    ok, reason = write_rotated_rollout(path, new_path, {old_id: new_id})
+    ok, reason = write_rotated_rollout(path, new_path, id_map)
     if not ok:
         return False, None, "skipped", reason
     return True, new_path, None, None
@@ -404,6 +420,9 @@ def table_exists(conn, name):
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
         (name,),
     ).fetchone() is not None
+
+def table_has_column(conn, table, column):
+    return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
 
 def update_state_db(db_path, id_map, path_map):
     changed = 0
@@ -425,6 +444,16 @@ def update_state_db(db_path, id_map, path_map):
                     "UPDATE threads SET rollout_path = ? WHERE rollout_path = ?",
                     (new_path, old_path),
                 ).rowcount
+            if table_has_column(conn, "threads", "source"):
+                sources = list(conn.execute("SELECT rowid, source FROM threads"))
+                for rowid, source in sources:
+                    new_source, source_changed = replace_source_ids(source, id_map)
+                    if not source_changed:
+                        continue
+                    changed += conn.execute(
+                        "UPDATE threads SET source = ? WHERE rowid = ?",
+                        (new_source, rowid),
+                    ).rowcount
 
         table_updates = [
             ("thread_dynamic_tools", "thread_id"),
@@ -535,13 +564,16 @@ def update_session_index(id_map):
         tmp.unlink(missing_ok=True)
         raise RuntimeError(f"could not update session index {path}: {error}") from error
 
-def rollback_rewrites(rotated_ids, rotated_paths, rollback_dbs):
+def rollback_rewrites(rotated_ids, rotated_paths, rollback_dbs, rollout_id_map=None):
+    inverse_rollout_map = {
+        new_id: old_id for old_id, new_id in (rollout_id_map or rotated_ids).items()
+    }
     inverse_map = {new_id: old_id for old_id, new_id in rotated_ids.items()}
     inverse_path_map = path_string_updates({new_path: old_path for old_path, new_path in rotated_paths.items()})
     rollback_errors = []
 
     for old_path, new_path in rotated_paths.items():
-        ok, reason = write_rotated_rollout(new_path, old_path, inverse_map)
+        ok, reason = write_rotated_rollout(new_path, old_path, inverse_rollout_map)
         if not ok:
             rollback_errors.append(f"could not roll back rollout {new_path}: {reason}")
 
@@ -627,6 +659,7 @@ if len(target_paths) != len(path_infos):
         if path in valid_paths:
             kept.append((path, old_id))
     path_infos = kept
+    id_map = {old_id: id_map[old_id] for _, old_id in path_infos}
 
 print("mode: " + ("apply" if apply_changes else "dry-run"))
 print(f"stale sqlite repairs: {len(stale_repair_ids)}")
@@ -690,19 +723,17 @@ rotated = 0
 rotated_ids = {}
 rotated_paths = {}
 for path, old_id in path_infos:
-    ok, new_path, failure_kind, reason = rotate_rollout(path, old_id, id_map[old_id])
+    ok, new_path, failure_kind, reason = rotate_rollout(path, old_id, id_map[old_id], id_map)
     if ok:
         rotated += 1
         rotated_ids[old_id] = id_map[old_id]
         rotated_paths[path] = new_path
-    elif failure_kind == "dirty":
-        print(f"error: session rollout left partially rotated ({reason}): {path}", file=sys.stderr)
-        rollback_errors = rollback_rewrites(rotated_ids, rotated_paths, False)
+    else:
+        print(f"error: could not rotate session rollout ({reason}): {path}", file=sys.stderr)
+        rollback_errors = rollback_rewrites(rotated_ids, rotated_paths, False, id_map)
         for rollback_error in rollback_errors:
             print(f"error: rollback failed: {rollback_error}", file=sys.stderr)
-        sys.exit(2)
-    else:
-        print(f"warning: skipped session rollout ({reason}): {path}", file=sys.stderr)
+        sys.exit(2 if rollback_errors or failure_kind == "dirty" else 1)
 
 try:
     rotated_path_strings = path_string_updates(rotated_paths)
@@ -710,7 +741,7 @@ try:
 except RuntimeError as error:
     print(f"error: {error}", file=sys.stderr)
     print("error: rolling back rewritten rollout files", file=sys.stderr)
-    rollback_errors = rollback_rewrites(rotated_ids, rotated_paths, False)
+    rollback_errors = rollback_rewrites(rotated_ids, rotated_paths, False, rotated_ids)
     for rollback_error in rollback_errors:
         print(f"error: rollback failed: {rollback_error}", file=sys.stderr)
     if rollback_errors:
@@ -722,7 +753,7 @@ try:
 except RuntimeError as error:
     print(f"error: {error}", file=sys.stderr)
     print("error: rolling back rewritten rollout files and SQLite references", file=sys.stderr)
-    rollback_errors = rollback_rewrites(rotated_ids, rotated_paths, True)
+    rollback_errors = rollback_rewrites(rotated_ids, rotated_paths, True, rotated_ids)
     for rollback_error in rollback_errors:
         print(f"error: rollback failed: {rollback_error}", file=sys.stderr)
     if rollback_errors:
