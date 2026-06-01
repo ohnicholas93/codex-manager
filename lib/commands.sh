@@ -103,6 +103,24 @@ cmd_rotate() {
   cmd_use "$best_profile"
 }
 
+cmd_rotate_ids() {
+  local apply=0
+
+  while (($#)); do
+    case "$1" in
+      --apply) apply=1 ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *) usage; die "unknown rotate-ids option: $1" ;;
+    esac
+    shift
+  done
+
+  rotate_session_ids "$apply"
+}
+
 main() {
   local command="${1:-}"
   shift || true
@@ -111,6 +129,7 @@ main() {
     get) cmd_get "$@" ;;
     use) cmd_use "$@" ;;
     rotate) cmd_rotate "$@" ;;
+    rotate-ids) cmd_rotate_ids "$@" ;;
     list) cmd_list "$@" ;;
     -h|--help|help|"") usage ;;
     *) usage; die "unknown command: $command" ;;

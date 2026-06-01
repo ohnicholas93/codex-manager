@@ -40,7 +40,7 @@ lib/               # implementation modules
 
 - `bash`
 - `curl` for fast direct limit checks
-- `python3` for moving session provider metadata
+- `python3` for moving session provider metadata and rotating local thread IDs
 - `tmux` and `codex` for optional fallback when direct checks fail
 - Standard Unix utilities: `find`, `sed`, `awk`, `cp`, `rm`, `ln`, `install`
 
@@ -50,6 +50,7 @@ lib/               # implementation modules
 codex-manager list
 codex-manager get [--tmux-fallback|--no-tmux-fallback]
 codex-manager use [--move] [--move-days DAYS] <name>
+codex-manager rotate-ids [--apply]
 codex-manager rotate
 ```
 
@@ -126,6 +127,30 @@ codex-manager use --move --move-days -1 gmail
 
 Custom provider targets write the profile name as the session provider. OpenAI
 subscription targets write `openai`.
+
+### Rotating local thread IDs
+
+Codex uses a thread's id as the upstream `prompt_cache_key`. To intentionally
+break prompt-cache continuity for all locally discoverable sessions without
+changing providers, use:
+
+```bash
+codex-manager rotate-ids
+```
+
+The command is a dry run by default. It scans both `$CODEX_HOME/sessions/` and
+`$CODEX_HOME/archived_sessions/`, plus matching Desktop thread-index rows, and
+prints every eligible old-id to new-id rewrite. To apply the migration:
+
+```bash
+codex-manager rotate-ids --apply
+```
+
+Active rollouts that are open by a running Codex process are skipped and
+reported. Inactive rollout files are written under their new filename before
+the old filename is removed, with original file modes and mtimes preserved.
+Codex Manager also updates local SQLite thread references, rollout paths, and
+thread-name index entries so resumed threads use the new ids.
 
 To back up the existing active `auth.json` before replacement:
 

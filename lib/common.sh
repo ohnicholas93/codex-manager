@@ -5,8 +5,10 @@ Usage:
   codex-manager get [--tmux-fallback|--no-tmux-fallback]
   codex-manager use [--move] [--move-days DAYS] <name>
   codex-manager rotate
+  codex-manager rotate-ids [--apply]
 
 Options:
+  --apply                           For rotate-ids, rewrite all eligible session ids
   --move                            For use, rewrite session providers in $CODEX_HOME/sessions
   --move-days DAYS                  For use --move, limit moved sessions by mtime; default 30, -1 means all
   --tmux-fallback                    For get, fall back to tmux/codex when direct checks fail
